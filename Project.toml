@@ -1,0 +1,9 @@
+name = "DropboxSDK"
+uuid = "4699c5e0-466e-11e9-14e3-97fc6d8e6283"
+authors = ["Erik Schnetter <schnetter@gmail.com>"]
+version = "0.1.0"
+
+[deps]
+ConfParser = "88353bc9-fd38-507d-a820-d3b43837d6b9"
+HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
+JSON = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
