@@ -209,13 +209,86 @@ end
 
 
 
+abstract type SpaceAllocation end
+SpaceAllocation(d::Dict) = Dict(
+    "individual" => IndividualSpaceAllocation,
+    "team" => TeamSpaceAllocation,
+)[d[".tag"]](d)
+
+struct IndividualSpaceAllocation <: SpaceAllocation
+    allocated::Int64
+end
+IndividualSpaceAllocation(d::Dict) = IndividualSpaceAllocation(
+    d["allocated"],
+)
+
+@enum MemberSpaceLimitType off alert_only stop_sync
+MemberSpaceLimitType(d::Dict) = Dict(
+    "off" => off,
+    "alert_only" => alert_only,
+    "stop_sync" => stop_sync,
+)[d[".tag"]]
+
+struct TeamSpaceAllocation <: SpaceAllocation
+    used::Int64
+    allocated::Int64
+    user_within_team_space_allocated::Int64
+    user_within_team_space_limit_type::MemberSpaceLimitType
+end
+TeamSpaceAllocation(d::Dict) = TeamSpaceAllocation(
+    d["used"],
+    d["allocated"],
+    d["user_within_team_space_allocated"],
+    MemberSpaceLimitType(d["user_within_team_space_limit_type"]),
+)
+
+struct SpaceUsage
+    used::Int64
+    allocation::SpaceAllocation
+end
+SpaceUsage(d::Dict) = SpaceUsage(
+    d["used"],
+    SpaceAllocation(d["allocation"]),
+)
+
+SpaceUsage(d::Dict) = SpaceUsage(
+    d["used"],
+    d["allocation"],
+)
+
+function users_get_space_usage(auth::Authorization)::
+    Union{Nothing, SpaceUsage}
+    resp = HTTP.request(
+        "POST",
+        "https://api.dropboxapi.com/2/users/get_space_usage",
+        ["Authorization" => "Bearer $(auth.access_token)",
+         ],
+        verbose=0)
+    if ! (200 <= resp.status <= 299)
+        println("Error:")
+        println("Status: $(resp.status)")
+        println(String(resp.body))
+        return nothing
+    end
+    res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
+    SpaceUsage(res)
+end
+
+
+
 function main()
     auth = read_authorization()
+
     account = users_get_current_account(auth)
     first = account.name.given_name
     last = account.name.surname
     display = account.name.display_name
     println("account: name: $first $last ($display)")
+
+    usage = users_get_space_usage(auth)
+    used = usage.used
+    println("usage: $(round(Int, used / 1.0e9)) GByte")
+
     files = files_list_folder(auth, "")
     println("files:")
     for (i,file) in enumerate(files)
