@@ -59,6 +59,7 @@ end
     metadata =
         files_upload(auth, "/$folder/file", Vector{UInt8}("Hello, World!\n"))
     @test metadata isa FileMetadata
+    @test metadata.size == length("Hello, World!\n")
     entries = files_list_folder(auth, "/$folder", recursive=true)
     @test count(entry -> startswith(entry.path_display, "/$folder"),
                 entries) == 2
@@ -82,6 +83,7 @@ end
 @testset "Upload empty file" begin
     metadata = files_upload(auth, "/$folder/file0", Vector{UInt8}(""))
     @test metadata isa FileMetadata
+    @test metadata.size == 0
     entries = files_list_folder(auth, "/$folder", recursive=true)
     @test count(entry -> startswith(entry.path_display, "/$folder"),
                 entries) == 3
@@ -95,10 +97,11 @@ end
     @test String(content) == ""
 end
 
-@testset "Upload file via session" begin
+@testset "Upload file in chunks" begin
     content = map(Vector{UInt8}, ["Hello, ","World!\n"])
     metadata = files_upload(auth, "/$folder/file1", ContentIterator(content))
     @test metadata isa FileMetadata
+    @test metadata.size == length("Hello, World!\n")
     entries = files_list_folder(auth, "/$folder", recursive=true)
     @test count(entry -> startswith(entry.path_display, "/$folder"),
                 entries) == 4
@@ -112,10 +115,11 @@ end
     @test String(content) == "Hello, World!\n"
 end
 
-@testset "Upload empty file via session" begin
-    content = map(Vector{UInt8}, ["Hello, ","World!\n"])
+@testset "Upload empty file in chunks" begin
+    content = map(Vector{UInt8}, String[])
     metadata = files_upload(auth, "/$folder/file2", ContentIterator(content))
     @test metadata isa FileMetadata
+    @test metadata.size == 0
     entries = files_list_folder(auth, "/$folder", recursive=true)
     @test count(entry -> startswith(entry.path_display, "/$folder"),
                 entries) == 5
@@ -126,7 +130,7 @@ end
 @testset "Download empty file" begin
     metadata, content = files_download(auth, "/$folder/file2")
     @test metadata.path_display == "/$folder/file2"
-    @test String(content) == "Hello, World!\n"
+    @test String(content) == ""
 end
 
 const numfiles = 4
@@ -138,6 +142,8 @@ const numfiles = 4
     metadatas = files_upload(auth, contents)
     @test length(metadatas) == numfiles
     @test all(metadata isa FileMetadata for metadata in metadatas)
+    @test all(metadata.size == (i-1) * length("Hello, World!\n")
+              for (i,metadata) in enumerate(metadatas))
     entries = files_list_folder(auth, "/$folder", recursive=true)
     @test count(entry -> startswith(entry.path_display, "/$folder"),
                 entries) == numfiles + 5

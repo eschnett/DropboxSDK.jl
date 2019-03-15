@@ -569,8 +569,28 @@ struct StatefulIterator{T}
 end
 
 export ContentIterator
+"""
+    struct ContentIterator{T}
+
+A stateful iterator that returns values of type `Vector{UInt}`.
+"""
 const ContentIterator = StatefulIterator{Vector{UInt8}}
 
+"""
+    files_upload(auth::Authorization,
+                 path::String,
+                 content::ContentIterator
+                )::Union{Error, FileMetadata}
+
+Upload a file `path`, returning its metadata. The file contents are
+passed via an iterator `content` that returns chunks of data. Each
+chunk needs to be of type `Vector{UInt8}`, and should be no larger
+than 150 MByte.
+
+This function should only be used if only a few files are uploaded.
+Other `files_upload` functions are more efficientif there are many
+files to be uploaded.
+"""
 function files_upload(auth::Authorization,
                       path::String,
                       content::ContentIterator)::Union{Error, FileMetadata}
@@ -605,7 +625,7 @@ function files_upload(auth::Authorization,
     end
     if session_id === nothing
         # The file was empty
-        @assert offset = 0
+        @assert offset == 0
         metadata = files_upload(auth, path, UInt8[])
     else
         # Note: We don't need to close the session, so we skip this step
@@ -641,6 +661,20 @@ end
 
 
 
+"""
+    files_upload(auth::Authorization,
+                 contents::StatefulIterator{Tuple{String, ContentIterator}}
+                )::Union{Error, Vector{Union{Error, FileMetadata}}}
+
+Upload several files simultaneously in an efficient manner. The list
+of files is passed via an iterator `contents`. Each file is specifiedy
+by a path (as `String`) and its content (as `ContentIterator`). Each
+chunk needs to be of type `Vector{UInt8}`, and should be no larger
+than 150 MByte. No more than 1000 files should be uploaded
+simultaneously (TODO: avoid this limitation.)
+
+This function is efficient if many or larger files are uploaded.
+"""
 function files_upload(
     auth::Authorization,
     contents::StatefulIterator{Tuple{String, ContentIterator}})::
