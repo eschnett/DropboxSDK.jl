@@ -69,22 +69,22 @@ function files_create_folder(auth::Authorization, path::String)::
         "path" => path,
         "autorename" => false,
     )
-    try
-        HTTP.request(
-            "POST",
-            "https://api.dropboxapi.com/2/files/create_folder",
-            ["Authorization" => "Bearer $(auth.access_token)",
-             "Content-Type" => "application/json",
-             ],
-            JSON.json(args);
-            verbose=0)
-        return nothing
-    catch ex
-        resp = ex.response
-        res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
-        println("Error $(ex.status): $(res["error_summary"])")
-        return Error(res)
-    end
+    res = call(auth, "files/create_folder", args)
+    if res isa Error return res end
+    return nothing
+end
+
+
+
+function files_delete(auth::Authorization, path::String)::
+    Union{Error, Nothing}
+    args = Dict(
+        "path" => path,
+        # parent_rev
+    )
+    res = call(auth, "files/delete", args)
+    if res isa Error return res end
+    return nothing
 end
 
 
@@ -394,6 +394,14 @@ function main()
     end
 
     files_create_folder(auth, "/folder")
+
+    entries = files_list_folder(auth, "")
+    println("entries:")
+    for (i,entry) in enumerate(entries)
+        println("    $i: $(filename(entry))")
+    end
+
+    files_delete(auth, "/folder")
 
     entries = files_list_folder(auth, "")
     println("entries:")
