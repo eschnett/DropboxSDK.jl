@@ -72,6 +72,13 @@ end
     @test String(content) == "Hello, World!\n"
 end
 
+@testset "Get file metadata" begin
+    metadata = files_get_metadata(auth, "/$folder/file")
+    @test metadata.path_display == "/$folder/file"
+    @test (metadata.content_hash ==
+           calc_content_hash(Vector{UInt8}("Hello, World!\n")))
+end
+
 @testset "Upload empty file" begin
     metadata = files_upload(auth, "/$folder/file0", Vector{UInt8}(""))
     @test metadata isa FileMetadata

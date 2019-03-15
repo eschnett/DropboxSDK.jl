@@ -105,6 +105,7 @@ function post_rpc(auth::Authorization,
     else
         body = HTTP.nobody
     end
+    @label retry
     try
         resp = HTTP.request(
             "POST", "https://api.dropboxapi.com/2/$fun", headers, body;
@@ -116,6 +117,15 @@ function post_rpc(auth::Authorization,
         ex::HTTP.StatusError
         resp = ex.response
         res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
+        retry_after = get(res, "retry_after", nothing)
+        if retry_after !== nothing
+            # We are rate limited; wait and try again
+            println("Warning $(ex.status): $(res["error_summary"])")
+            println("Waiting $retry_after seconds...")
+            sleep(retry_after)
+            println("Retrying...")
+            @goto retry
+        end
         println("Error $(ex.status): $(res["error_summary"])")
         return Error(res)
     end
@@ -142,6 +152,7 @@ function post_content_upload(auth::Authorization,
     push!(headers, "Dropbox-API-Arg" => JSON.json(args))
     push!(headers, "Content-Type" => "application/octet-stream")
     body = content
+    @label retry
     try
         resp = HTTP.request(
             "POST", "https://content.dropboxapi.com/2/$fun", headers, body;
@@ -149,9 +160,19 @@ function post_content_upload(auth::Authorization,
         res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
         return res
     catch ex
+        @show ex
         ex::HTTP.StatusError
         resp = ex.response
         res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
+        retry_after = get(res, "retry_after", nothing)
+        if retry_after !== nothing
+            # We are rate limited; wait and try again
+            println("Warning $(ex.status): $(res["error_summary"])")
+            println("Waiting $retry_after seconds...")
+            sleep(retry_after)
+            println("Retrying...")
+            @goto retry
+        end
         println("Error $(ex.status): $(res["error_summary"])")
         return Error(res)
     end
@@ -175,6 +196,7 @@ function post_content_download(auth::Authorization,
                ]
     push!(headers, "Dropbox-API-Arg" => JSON.json(args))
     push!(headers, "Content-Type" => "application/octet-stream")
+    @label retry
     try
         resp = HTTP.request(
             "POST", "https://content.dropboxapi.com/2/$fun", headers;
@@ -184,9 +206,19 @@ function post_content_download(auth::Authorization,
                          dicttype=Dict, inttype=Int64)
         return res, resp.body
     catch ex
+        @show ex
         ex::HTTP.StatusError
         resp = ex.response
         res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
+        retry_after = get(res, "retry_after", nothing)
+        if retry_after !== nothing
+            # We are rate limited; wait and try again
+            println("Warning $(ex.status): $(res["error_summary"])")
+            println("Waiting $retry_after seconds...")
+            sleep(retry_after)
+            println("Retrying...")
+            @goto retry
+        end
         println("Error $(ex.status): $(res["error_summary"])")
         return Error(res)
     end
@@ -298,6 +330,61 @@ end
 
 
 
+export files_download
+"""
+    files_download(auth::Authorization,
+                   path::String
+                  )::Union{Error, Tuple{FileMetadata, Vector{UInt8}}}
+
+Download file `path`, return both its metadata and content.
+"""
+function files_download(auth::Authorization,
+                        path::String)::
+    Union{Error, Tuple{FileMetadata, Vector{UInt8}}}
+
+    args = Dict(
+        "path" => path,
+    )
+    res = post_content_download(auth, "files/download", args)
+    if res isa Error return res end
+    res, content = res
+    metadata = FileMetadata(res)
+
+    # Check content hash
+    content_hash = calc_content_hash(content)
+    if metadata.content_hash != content_hash
+        return Error(Dict("error_summary" => "content hash does not match"))
+    end
+
+    return metadata, content
+end
+
+
+
+export files_get_metadata
+"""
+    files_get_metadata(auth::Authorization,
+                       path::String
+                      )::Union{Error, Metadata}
+
+Get metadata for file or folder `path`.
+"""
+function files_get_metadata(auth::Authorization,
+                            path::String)::Union{Error, Metadata}
+    args = Dict(
+        "path" => path,
+        "include_media_info" => false,
+        "include_deleted" => false,
+        "include_has_explicit_shared_members" => false,
+        # "include_property_groups"
+    )
+    res = post_rpc(auth, "files/get_metadata", args)
+    if res isa Error return res end
+    return Metadata(res)
+end
+
+
+
 export Metadata
 abstract type Metadata end
 Metadata(d::Dict) = Dict(
@@ -405,37 +492,6 @@ function files_list_folder(auth::Authorization,
     if res isa Error return res end
     @assert !res["has_more"]
     return Metadata[Metadata(x) for x in res["entries"]]
-end
-
-
-
-export files_download
-"""
-    files_download(auth::Authorization,
-                   path::String
-                  )::Union{Error, Tuple{FileMetadata, Vector{UInt8}}}
-
-Download file `path`, return both its metadata and content.
-"""
-function files_download(auth::Authorization,
-                        path::String)::
-    Union{Error, Tuple{FileMetadata, Vector{UInt8}}}
-
-    args = Dict(
-        "path" => path,
-    )
-    res = post_content_download(auth, "files/download", args)
-    if res isa Error return res end
-    res, content = res
-    metadata = FileMetadata(res)
-
-    # Check content hash
-    content_hash = calc_content_hash(content)
-    if metadata.content_hash != content_hash
-        return Error(Dict("error_summary" => "content hash does not match"))
-    end
-
-    return metadata, content
 end
 
 
