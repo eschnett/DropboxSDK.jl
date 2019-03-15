@@ -3,6 +3,8 @@ environment:
     - julia_version: "1.0"
     - julia_version: "1.1"
     - julia_version: "nightly"
+  DROPBOXSDK_ACCESS_TOKEN:
+    secure: ag4dDe1coMUE1IWW3u+IdYM9/NN6VBgU9h0Y5D8FlSWrmdlh8iHa7peBwggVW80+Zf5DzkOFAQw0COCMrSMn+fk8zuEheOApQEbWWy9nzbU=
 
 platform:
   - x86                         # 32-bit
@@ -11,10 +13,6 @@ platform:
 matrix:
   allow_failures:
     - julia_version: "nightly"
-
-environment:
-  DROPBOXSDK_ACCESS_TOKEN:
-    secure: ag4dDe1coMUE1IWW3u+IdYM9/NN6VBgU9h0Y5D8FlSWrmdlh8iHa7peBwggVW80+Zf5DzkOFAQw0COCMrSMn+fk8zuEheOApQEbWWy9nzbU=
 
 branches:
   only:
