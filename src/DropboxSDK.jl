@@ -6,12 +6,16 @@ using JSON
 
 
 
-struct Nothing2 end
-const nothing2 = Nothing2()
-function mapget(fun::Function, dict::Dict, key, default=nothing)
-    value = get(dict, key, nothing2)
-    if value === nothing2 return default end
+function mapget(fun::Function, dict::Dict, key, def=nothing)
+    value = get(dict, key, nothing)
+    if value === nothing return def end
     fun(value)
+end
+
+
+
+struct Error
+    dict::Dict{String, Any}
 end
 
 
@@ -29,8 +33,139 @@ end
 
 
 
+function call(auth::Authorization,
+              fun::String,
+              args::Union{Nothing, Dict} = nothing)::Union{Error, Dict}
+    headers = ["Authorization" => "Bearer $(auth.access_token)",
+               ]
+    body = HTTP.nobody
+    if args !== nothing
+        push!(headers, "Content-Type" => "application/json")
+        body = JSON.json(args)
+    end
+    try
+        resp = HTTP.request(
+            "POST", "https://api.dropboxapi.com/2/$fun", headers, body;
+            verbose=0)
+        res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
+        return res
+    catch ex
+        resp = ex.response
+        res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
+        println("Error $(ex.status): $(res["error_summary"])")
+        return Error(res)
+    end
+end
+
+
+
+################################################################################
+
+
+
+function files_create_folder(auth::Authorization, path::String)::
+    Union{Error, Nothing}
+    args = Dict(
+        "path" => path,
+        "autorename" => false,
+    )
+    try
+        HTTP.request(
+            "POST",
+            "https://api.dropboxapi.com/2/files/create_folder",
+            ["Authorization" => "Bearer $(auth.access_token)",
+             "Content-Type" => "application/json",
+             ],
+            JSON.json(args);
+            verbose=0)
+        return nothing
+    catch ex
+        resp = ex.response
+        res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
+        println("Error $(ex.status): $(res["error_summary"])")
+        return Error(res)
+    end
+end
+
+
+
+abstract type Metadata end
+Metadata(d::Dict) = Dict(
+    "file" => FileMetadata,
+    "folder" => FolderMetadata,
+    "deleted" => DeletedMetadata,
+)[d[".tag"]](d)
+
+struct MediaInfo end            # TODO
+struct SymlinkInfo end          # TODO
+struct FileSharingInfo end      # TODO
+struct PropertyGroup end        # TODO
+
+struct FileMetadata <: Metadata
+    name::String
+    id::String
+    client_modified::String
+    server_modified::String
+    rev::String
+    size::Int64
+    path_lower::Union{Nothing, String}
+    path_display::Union{Nothing, String}
+    media_info::Union{Nothing, MediaInfo}
+    symlink_info::Union{Nothing, SymlinkInfo}
+    sharing_info::Union{Nothing, FileSharingInfo}
+    property_groups::Union{Nothing, Vector{PropertyGroup}}
+    has_explicit_shared_members::Union{Nothing, Bool}
+    content_hash::Union{Nothing, String}
+end
+FileMetadata(d::Dict) = FileMetadata(
+    d["name"],
+    d["id"],
+    d["client_modified"],
+    d["server_modified"],
+    d["rev"],
+    d["size"],
+    get(d, "path_lower", nothing),
+    get(d, "path_display", nothing),
+    nothing,                    # TODO
+    nothing,                    # TODO
+    nothing,                    # TODO
+    nothing,                    # TODO
+    get(d, "has_explicit_shared_members", nothing),
+    get(d, "content_hash", nothing)
+)
+
+struct FolderSharingInfo end    # TODO
+
+struct FolderMetadata <: Metadata
+    name::String
+    id::String
+    path_lower::Union{Nothing, String}
+    path_display::Union{Nothing, String}
+    sharing_info::Union{Nothing, FolderSharingInfo}
+    property_groups::Union{Nothing, Vector{PropertyGroup}}
+end
+FolderMetadata(d::Dict) = FolderMetadata(
+    d["name"],
+    d["id"],
+    get(d, "path_lower", nothing),
+    get(d, "path_display", nothing),
+    nothing,                    # TODO
+    nothing                     # TODO
+)
+
+struct DeletedMetadata <: Metadata
+    name::String
+    path_lower::Union{Nothing, String}
+    path_display::Union{Nothing, String}
+end
+DeletedMetadata(d::Dict) = DeletedMetadata(
+    d["name"],
+    get(d, "path_lower", nothing),
+    get(d, "path_display", nothing)
+)
+
 function files_list_folder(auth::Authorization, path::String)::
-    Union{Nothing, Vector{String}}
+    Union{Error, Vector{Metadata}}
     args = Dict(
         "path" => path,
         "recursive" => false,
@@ -39,23 +174,10 @@ function files_list_folder(auth::Authorization, path::String)::
         "include_has_explicit_shared_members" => false,
         "include_mounted_folders" => true,
     )
-    resp = HTTP.request(
-        "POST",
-        "https://api.dropboxapi.com/2/files/list_folder",
-        ["Authorization" => "Bearer $(auth.access_token)",
-         "Content-Type" => "application/json",
-         ],
-        JSON.json(args);
-        verbose=0)
-    if ! (200 <= resp.status <= 299)
-        println("Error:")
-        println("Status: $(resp.status)")
-        println(String(resp.body))
-        return nothing
-    end
-    res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
+    res = call(auth, "files/list_folder", args)
+    if res isa Error return res end
     @assert !res["has_more"]
-    res["entries"]
+    return Metadata[Metadata(x) for x in res["entries"]]
 end
 
 
@@ -190,21 +312,10 @@ FullAccount(d::Dict) = FullAccount(
 )
 
 function users_get_current_account(auth::Authorization)::
-    Union{Nothing, FullAccount}
-    resp = HTTP.request(
-        "POST",
-        "https://api.dropboxapi.com/2/users/get_current_account",
-        ["Authorization" => "Bearer $(auth.access_token)",
-         ],
-        verbose=0)
-    if ! (200 <= resp.status <= 299)
-        println("Error:")
-        println("Status: $(resp.status)")
-        println(String(resp.body))
-        return nothing
-    end
-    res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
-    FullAccount(res)
+    Union{Error, FullAccount}
+    res = call(auth, "users/get_current_account")
+    if res isa Error return res end
+    return FullAccount(res)
 end
 
 
@@ -251,27 +362,11 @@ SpaceUsage(d::Dict) = SpaceUsage(
     SpaceAllocation(d["allocation"]),
 )
 
-SpaceUsage(d::Dict) = SpaceUsage(
-    d["used"],
-    d["allocation"],
-)
-
 function users_get_space_usage(auth::Authorization)::
-    Union{Nothing, SpaceUsage}
-    resp = HTTP.request(
-        "POST",
-        "https://api.dropboxapi.com/2/users/get_space_usage",
-        ["Authorization" => "Bearer $(auth.access_token)",
-         ],
-        verbose=0)
-    if ! (200 <= resp.status <= 299)
-        println("Error:")
-        println("Status: $(resp.status)")
-        println(String(resp.body))
-        return nothing
-    end
-    res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
-    SpaceUsage(res)
+    Union{Error, SpaceUsage}
+    res = call(auth, "users/get_space_usage")
+    if res isa Error return res end
+    return SpaceUsage(res)
 end
 
 
@@ -289,10 +384,21 @@ function main()
     used = usage.used
     println("usage: $(round(Int, used / 1.0e9)) GByte")
 
-    files = files_list_folder(auth, "")
-    println("files:")
-    for (i,file) in enumerate(files)
-        println("$i: $file")
+    filename(entry) =
+        entry.path_display === nothing ? entry.name : entry.path_display
+
+    entries = files_list_folder(auth, "")
+    println("entries:")
+    for (i,entry) in enumerate(entries)
+        println("    $i: $(filename(entry))")
+    end
+
+    files_create_folder(auth, "/folder")
+
+    entries = files_list_folder(auth, "")
+    println("entries:")
+    for (i,entry) in enumerate(entries)
+        println("    $i: $(filename(entry))")
     end
 end
 
