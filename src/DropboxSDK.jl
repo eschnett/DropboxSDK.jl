@@ -4,6 +4,7 @@ module DropboxSDK
 using ConfParser
 using HTTP
 using JSON
+using SHA
 
 
 
@@ -197,6 +198,25 @@ end
 
 
 
+export calc_content_hash
+"""
+    calc_content_hash(data::Vector{UInt8})::String
+
+Calculate the content hash of a byte array with Dropbox's algorithm.
+"""
+function calc_content_hash(data::AbstractVector{UInt8})::String
+    chunksums = UInt8[]
+    chunksize = 4 * 1024 * 1024
+    len = length(data)
+    for offset in 1:chunksize:len
+        chunk = @view data[offset : min(offset+chunksize-1, len)]
+        append!(chunksums, sha256(chunk))
+    end
+    bytes2hex(sha256(chunksums))
+end
+
+
+
 export files_create_folder
 """
     files_create_folder(auth::Authorization,
@@ -219,6 +239,13 @@ end
 
 
 export files_delete
+"""
+    files_delete(auth::Authorization,
+                 path::String
+                )::Union{Error, Nothing}
+
+Delete a file or folder `path` recursively.
+"""
 function files_delete(auth::Authorization,
                       path::String)::Union{Error, Nothing}
     args = Dict(
@@ -314,6 +341,14 @@ DeletedMetadata(d::Dict) = DeletedMetadata(
 )
 
 export files_list_folder
+"""
+    files_list_folder(auth::Authorization,
+                      path::String;
+                      recursive::Bool = false
+                     )::Union{Error, Metadata}
+
+List the contents of folder `path`.
+"""
 function files_list_folder(auth::Authorization,
                            path::String;
                            recursive::Bool = false)::
@@ -336,6 +371,13 @@ end
 
 
 export files_download
+"""
+    files_download(auth::Authorization,
+                   path::String
+                  )::Union{Error, Tuple{FileMetadata, Vector{UInt8}}}
+
+Download file `path`, return both its metadata and content.
+"""
 function files_download(auth::Authorization,
                         path::String)::
     Union{Error, Tuple{FileMetadata, Vector{UInt8}}}
@@ -346,7 +388,15 @@ function files_download(auth::Authorization,
     res = post_content_download(auth, "files/download", args)
     if res isa Error return res end
     res, content = res
-    return FileMetadata(res), content
+    metadata = FileMetadata(res)
+
+    # Check content hash
+    content_hash = calc_content_hash(content)
+    if metadata.content_hash != content_hash
+        return Error(Dict("error_summary" => "content hash does not match"))
+    end
+
+    return metadata, content
 end
 
 
@@ -355,9 +405,23 @@ export WriteMode
 @enum WriteMode add overwrite # update
 
 export files_upload
+"""
+    files_upload(auth::Authorization,
+                 path::String,
+                 content::Vector{UInt8}
+                )::Union{Error, FileMetadata}
+
+Upload the byte array `content` to a file `path`, returning its
+metadata. This function should only be used for small files (< 150
+MByte), and if only a few files are uploaded. Other `files_upload`
+functions are more efficient for large files and/or if there are many
+files to be uploaded.
+"""
 function files_upload(auth::Authorization,
                       path::String,
-                      content::Vector{UInt8})::Union{Error, FileMetadata}
+                      content::Vector{UInt8})::
+    Union{Error, FileMetadata}
+
     args = Dict(
         "path" => path,
         "mode" => add,
@@ -369,7 +433,15 @@ function files_upload(auth::Authorization,
     )
     res = post_content_upload(auth, "files/upload", args, content)
     if res isa Error return res end
-    return FileMetadata(res)
+    metadata = FileMetadata(res)
+
+    # Check content hash
+    content_hash = calc_content_hash(content)
+    if metadata.content_hash != content_hash
+        return Error(Dict("error_summary" => "content hash does not match"))
+    end
+
+    return metadata
 end
 
 export StatefulIterator
@@ -421,7 +493,11 @@ function files_upload(auth::Authorization,
             offset = offset + length(chunk)
         end
     end
-    if session_id !== nothing
+    if session_id === nothing
+        # The file was empty
+        @assert offset = 0
+        metadata = files_upload(auth, path, UInt8[])
+    else
         # We don't need to close the session
         # args = Dict(
         #     "cursor" => Dict(
@@ -451,11 +527,10 @@ function files_upload(auth::Authorization,
         res = post_content_upload(auth, "files/upload_session/finish",
                                   args, UInt8[])
         if res isa Error return res end
-        return FileMetadata(res)
+        metadata = FileMetadata(res)
     end
-    # The file was empty
-    @assert offset = 0
-    return files_upload(auth, path, UInt8[])
+
+    return metadata
 end
 
 function files_upload(
