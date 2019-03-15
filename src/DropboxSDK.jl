@@ -274,11 +274,23 @@ mutable struct ContentHashState
 end
 
 export calc_content_hash_init
+"""
+    calc_content_hash_init()::ContentHashState
+
+Initialize calculating a content hash in chunks.
+"""
 function calc_content_hash_init()::ContentHashState
     ContentHashState()
 end
 
 export calc_content_hash_add!
+"""
+    calc_content_hash_add!(cstate::ContentHashState,
+                           data::AbstractVector{UInt8}
+                          )::Nothing
+
+Add a chunk of data to the content hash.
+"""
 function calc_content_hash_add!(cstate::ContentHashState,
                                 data::AbstractVector{UInt8})::Nothing
     append!(cstate.buffer, data)
@@ -295,6 +307,11 @@ function calc_content_hash_add!(cstate::ContentHashState,
 end
 
 export calc_content_hash_get
+"""
+    calc_content_hash_get(cstate::ContentHashState)::String
+
+Calculate the current content hash.
+"""
 function calc_content_hash_get(cstate::ContentHashState)::String
     extra = isempty(cstate.buffer) ? UInt8[] : sha256(cstate.buffer)
     bytes2hex(sha256(UInt8[cstate.chunksums; extra]))
@@ -955,6 +972,12 @@ FullAccount(d::Dict) = FullAccount(
 )
 
 export users_get_current_account
+"""
+    users_get_current_account(auth::Authorization)::Union{Error, FullAccount}
+
+Get information about the current account, i.e. the account associated
+with the account token in the authorization `auth`.
+"""
 function users_get_current_account(auth::Authorization)::
     Union{Error, FullAccount}
 
@@ -1013,6 +1036,11 @@ SpaceUsage(d::Dict) = SpaceUsage(
 )
 
 export users_get_space_usage
+"""
+    users_get_space_usage(auth::Authorization)::Union{Error, SpaceUsage}
+
+Get the space usage for the current account.
+"""
 function users_get_space_usage(auth::Authorization)::Union{Error, SpaceUsage}
     res = post_rpc(auth, "users/get_space_usage")
     if res isa Error return res end
