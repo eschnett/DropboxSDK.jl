@@ -33,15 +33,16 @@ end
 
 
 
-function call(auth::Authorization,
-              fun::String,
-              args::Union{Nothing, Dict} = nothing)::Union{Error, Dict}
+function post_rpc(auth::Authorization,
+                  fun::String,
+                  args::Union{Nothing, Dict} = nothing)::Union{Error, Dict}
     headers = ["Authorization" => "Bearer $(auth.access_token)",
                ]
-    body = HTTP.nobody
     if args !== nothing
         push!(headers, "Content-Type" => "application/json")
         body = JSON.json(args)
+    else
+        body = HTTP.nobody
     end
     try
         resp = HTTP.request(
@@ -50,6 +51,61 @@ function call(auth::Authorization,
         res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
         return res
     catch ex
+        ex::HTTP.StatusError
+        resp = ex.response
+        res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
+        println("Error $(ex.status): $(res["error_summary"])")
+        return Error(res)
+    end
+end
+
+
+
+function post_content_upload(auth::Authorization,
+                             fun::String,
+                             args::Union{Nothing, Dict},
+                             content::Vector{UInt8})::Union{Error, Dict}
+    headers = ["Authorization" => "Bearer $(auth.access_token)",
+               ]
+    push!(headers, "Dropbox-API-Arg" => JSON.json(args))
+    push!(headers, "Content-Type" => "application/octet-stream")
+    body = content
+    try
+        resp = HTTP.request(
+            "POST", "https://content.dropboxapi.com/2/$fun", headers, body;
+            verbose=0)
+        res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
+        return res
+    catch ex
+        ex::HTTP.StatusError
+        resp = ex.response
+        res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
+        println("Error $(ex.status): $(res["error_summary"])")
+        return Error(res)
+    end
+end
+
+
+
+function post_content_download(auth::Authorization,
+                               fun::String,
+                               args::Union{Nothing, Dict})::
+    Union{Error, Tuple{Dict, Vector{UInt8}}}
+    headers = ["Authorization" => "Bearer $(auth.access_token)",
+               ]
+    push!(headers, "Dropbox-API-Arg" => JSON.json(args))
+    push!(headers, "Content-Type" => "application/octet-stream")
+    try
+        resp = HTTP.request(
+            "POST", "https://content.dropboxapi.com/2/$fun", headers;
+            verbose=0)
+        resp2 = Dict(lowercase(key) => value for (key, value) in resp.headers)
+        res = JSON.parse(String(resp2["dropbox-api-result"]);
+                         dicttype=Dict, inttype=Int64)
+        return res, resp.body
+    catch ex
+        @show ex
+        ex::HTTP.StatusError
         resp = ex.response
         res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
         println("Error $(ex.status): $(res["error_summary"])")
@@ -63,26 +119,26 @@ end
 
 
 
-function files_create_folder(auth::Authorization, path::String)::
-    Union{Error, Nothing}
+function files_create_folder(auth::Authorization,
+                             path::String)::Union{Error, Nothing}
     args = Dict(
         "path" => path,
         "autorename" => false,
     )
-    res = call(auth, "files/create_folder", args)
+    res = post_rpc(auth, "files/create_folder", args)
     if res isa Error return res end
     return nothing
 end
 
 
 
-function files_delete(auth::Authorization, path::String)::
-    Union{Error, Nothing}
+function files_delete(auth::Authorization,
+                      path::String)::Union{Error, Nothing}
     args = Dict(
         "path" => path,
         # parent_rev
     )
-    res = call(auth, "files/delete", args)
+    res = post_rpc(auth, "files/delete", args)
     if res isa Error return res end
     return nothing
 end
@@ -164,20 +220,57 @@ DeletedMetadata(d::Dict) = DeletedMetadata(
     get(d, "path_display", nothing)
 )
 
-function files_list_folder(auth::Authorization, path::String)::
+function files_list_folder(auth::Authorization,
+                           path::String;
+                           recursive::Bool = false)::
     Union{Error, Vector{Metadata}}
     args = Dict(
         "path" => path,
-        "recursive" => false,
+        "recursive" => recursive,
         "include_media_info" => false,
         "include_deleted" => false,
         "include_has_explicit_shared_members" => false,
         "include_mounted_folders" => true,
     )
-    res = call(auth, "files/list_folder", args)
+    res = post_rpc(auth, "files/list_folder", args)
     if res isa Error return res end
     @assert !res["has_more"]
     return Metadata[Metadata(x) for x in res["entries"]]
+end
+
+
+
+function files_download(auth::Authorization,
+                        path::String)::
+    Union{Error, Tuple{FileMetadata, Vector{UInt8}}}
+    args = Dict(
+        "path" => path,
+    )
+    res = post_content_download(auth, "files/download", args)
+    if res isa Error return res end
+    res, content = res
+    return FileMetadata(res), content
+end
+
+
+
+@enum WriteMode add overwrite # update
+
+function files_upload(auth::Authorization,
+                      path::String,
+                      content::Vector{UInt8})::Union{Error, FileMetadata}
+    args = Dict(
+        "path" => path,
+        "mode" => add,
+        "autorename" => false,
+        # "client_modified"
+        "mute" => false,
+        # "property_groups"
+        "strict_conflict" => false,
+    )
+    res = post_content_upload(auth, "files/upload", args, content)
+    if res isa Error return res end
+    return FileMetadata(res)
 end
 
 
@@ -313,7 +406,7 @@ FullAccount(d::Dict) = FullAccount(
 
 function users_get_current_account(auth::Authorization)::
     Union{Error, FullAccount}
-    res = call(auth, "users/get_current_account")
+    res = post_rpc(auth, "users/get_current_account")
     if res isa Error return res end
     return FullAccount(res)
 end
@@ -362,9 +455,8 @@ SpaceUsage(d::Dict) = SpaceUsage(
     SpaceAllocation(d["allocation"]),
 )
 
-function users_get_space_usage(auth::Authorization)::
-    Union{Error, SpaceUsage}
-    res = call(auth, "users/get_space_usage")
+function users_get_space_usage(auth::Authorization)::Union{Error, SpaceUsage}
+    res = post_rpc(auth, "users/get_space_usage")
     if res isa Error return res end
     return SpaceUsage(res)
 end
@@ -374,40 +466,59 @@ end
 function main()
     auth = read_authorization()
 
+    println("Getting current account...")
     account = users_get_current_account(auth)
     first = account.name.given_name
     last = account.name.surname
     display = account.name.display_name
-    println("account: name: $first $last ($display)")
+    println("    account: name: $first $last ($display)")
 
+    println("Getting space usage...")
     usage = users_get_space_usage(auth)
     used = usage.used
-    println("usage: $(round(Int, used / 1.0e9)) GByte")
+    println("    usage: $(round(Int, used / 1.0e9)) GByte")
 
     filename(entry) =
         entry.path_display === nothing ? entry.name : entry.path_display
 
-    entries = files_list_folder(auth, "")
-    println("entries:")
+    println("Listing folder...")
+    entries = files_list_folder(auth, "", recursive=true)
     for (i,entry) in enumerate(entries)
         println("    $i: $(filename(entry))")
     end
 
+    println("Creating folder...")
     files_create_folder(auth, "/folder")
 
-    entries = files_list_folder(auth, "")
-    println("entries:")
+    println("Listing folder...")
+    entries = files_list_folder(auth, "", recursive=true)
     for (i,entry) in enumerate(entries)
         println("    $i: $(filename(entry))")
     end
 
+    println("Uploading file...")
+    files_upload(auth, "/folder/file", Vector{UInt8}("Hello, World!\n"))
+
+    println("Listing folder...")
+    entries = files_list_folder(auth, "", recursive=true)
+    for (i,entry) in enumerate(entries)
+        println("    $i: $(filename(entry))")
+    end
+
+    println("Downloading file...")
+    metadata, content = files_download(auth, "/folder/file")
+    @assert String(content) == "Hello, World!\n"
+
+    println("Deleting folder...")
     files_delete(auth, "/folder")
 
-    entries = files_list_folder(auth, "")
-    println("entries:")
+    println("Listing folder...")
+    entries = files_list_folder(auth, "", recursive=true)
     for (i,entry) in enumerate(entries)
         println("    $i: $(filename(entry))")
     end
+
+    println("Done.")
 end
 
 end
