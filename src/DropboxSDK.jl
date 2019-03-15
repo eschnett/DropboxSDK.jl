@@ -90,7 +90,8 @@ end
 """
     post_rpc(auth::Authorization,
              fun::String,
-             args::Union{Nothing, Dict} = nothing)::Union{Error, Dict}
+             args::Union{Nothing, Dict} = nothing
+            )::Union{Error, Dict}
 
 Post an RPC request to the Dropbox API.
 """
@@ -105,6 +106,7 @@ function post_rpc(auth::Authorization,
     else
         body = HTTP.nobody
     end
+
     @label retry
     try
         resp = HTTP.request(
@@ -117,15 +119,18 @@ function post_rpc(auth::Authorization,
         ex::HTTP.StatusError
         resp = ex.response
         res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
-        retry_after = get(res, "retry_after", nothing)
+
+        # Should we retry?
+        resp2 = Dict(lowercase(key) => value for (key, value) in resp.headers)
+        retry_after = mapget(s->parse(Float64, s), resp2, "retry-after")
         if retry_after !== nothing
-            # We are rate limited; wait and try again
             println("Warning $(ex.status): $(res["error_summary"])")
             println("Waiting $retry_after seconds...")
             sleep(retry_after)
             println("Retrying...")
             @goto retry
         end
+
         println("Error $(ex.status): $(res["error_summary"])")
         return Error(res)
     end
@@ -152,6 +157,7 @@ function post_content_upload(auth::Authorization,
     push!(headers, "Dropbox-API-Arg" => JSON.json(args))
     push!(headers, "Content-Type" => "application/octet-stream")
     body = content
+
     @label retry
     try
         resp = HTTP.request(
@@ -164,15 +170,18 @@ function post_content_upload(auth::Authorization,
         ex::HTTP.StatusError
         resp = ex.response
         res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
-        retry_after = get(res, "retry_after", nothing)
+
+        # Should we retry?
+        resp2 = Dict(lowercase(key) => value for (key, value) in resp.headers)
+        retry_after = mapget(s->parse(Float64, s), resp2, "retry-after")
         if retry_after !== nothing
-            # We are rate limited; wait and try again
             println("Warning $(ex.status): $(res["error_summary"])")
             println("Waiting $retry_after seconds...")
             sleep(retry_after)
             println("Retrying...")
             @goto retry
         end
+
         println("Error $(ex.status): $(res["error_summary"])")
         return Error(res)
     end
@@ -183,7 +192,8 @@ end
 """
     post_content_download(auth::Authorization,
                           fun::String,
-                          args::Union{Nothing, Dict} = nothing)::Union{Error, Dict}
+                          args::Union{Nothing, Dict} = nothing
+                         )::Union{Error, Dict}
 
 Post a Content Download request to the Dropbox API.
 """
@@ -196,6 +206,7 @@ function post_content_download(auth::Authorization,
                ]
     push!(headers, "Dropbox-API-Arg" => JSON.json(args))
     push!(headers, "Content-Type" => "application/octet-stream")
+
     @label retry
     try
         resp = HTTP.request(
@@ -210,15 +221,18 @@ function post_content_download(auth::Authorization,
         ex::HTTP.StatusError
         resp = ex.response
         res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
-        retry_after = get(res, "retry_after", nothing)
+
+        # Should we retry?
+        resp2 = Dict(lowercase(key) => value for (key, value) in resp.headers)
+        retry_after = mapget(s->parse(Float64, s), resp2, "retry-after")
         if retry_after !== nothing
-            # We are rate limited; wait and try again
             println("Warning $(ex.status): $(res["error_summary"])")
             println("Waiting $retry_after seconds...")
             sleep(retry_after)
             println("Retrying...")
             @goto retry
         end
+
         println("Error $(ex.status): $(res["error_summary"])")
         return Error(res)
     end
