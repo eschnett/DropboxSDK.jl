@@ -14,17 +14,24 @@ end
 
 
 
+################################################################################
+
+
+
+export Error
 struct Error
     dict::Dict{String, Any}
 end
 
 
 
+export Authorization
 struct Authorization
     access_token::String
 end
 
-function read_authorization()::Authorization
+export get_authorization
+function get_authorization()::Authorization
     access_token = nothing
     if access_token === nothing
         access_token = get(ENV, "DROPBOXSDK_ACCESS_TOKEN", nothing)
@@ -35,10 +42,14 @@ function read_authorization()::Authorization
         access_token = retrieve(conf, "access_token")
     end
     if access_token === nothing
-        println("Error: Could not find access token for Dropbxo")
+        error("Could not find access token for Dropbox")
     end
     Authorization(access_token)
 end
+
+
+
+################################################################################
 
 
 
@@ -128,6 +139,7 @@ end
 
 
 
+export files_create_folder
 function files_create_folder(auth::Authorization,
                              path::String)::Union{Error, Nothing}
     args = Dict(
@@ -141,6 +153,7 @@ end
 
 
 
+export files_delete
 function files_delete(auth::Authorization,
                       path::String)::Union{Error, Nothing}
     args = Dict(
@@ -154,6 +167,7 @@ end
 
 
 
+export Metadata
 abstract type Metadata end
 Metadata(d::Dict) = Dict(
     "file" => FileMetadata,
@@ -161,11 +175,13 @@ Metadata(d::Dict) = Dict(
     "deleted" => DeletedMetadata,
 )[d[".tag"]](d)
 
+export MediaInfo, SymlinkInfo, FileSharingInfo, PropertyGroup
 struct MediaInfo end            # TODO
 struct SymlinkInfo end          # TODO
 struct FileSharingInfo end      # TODO
 struct PropertyGroup end        # TODO
 
+export FileMetadata
 struct FileMetadata <: Metadata
     name::String
     id::String
@@ -199,8 +215,10 @@ FileMetadata(d::Dict) = FileMetadata(
     get(d, "content_hash", nothing)
 )
 
+export FolderSharingInfo
 struct FolderSharingInfo end    # TODO
 
+export FolderMetadata
 struct FolderMetadata <: Metadata
     name::String
     id::String
@@ -218,6 +236,7 @@ FolderMetadata(d::Dict) = FolderMetadata(
     nothing                     # TODO
 )
 
+export DeletedMetadata
 struct DeletedMetadata <: Metadata
     name::String
     path_lower::Union{Nothing, String}
@@ -229,6 +248,7 @@ DeletedMetadata(d::Dict) = DeletedMetadata(
     get(d, "path_display", nothing)
 )
 
+export files_list_folder
 function files_list_folder(auth::Authorization,
                            path::String;
                            recursive::Bool = false)::
@@ -249,6 +269,7 @@ end
 
 
 
+export files_download
 function files_download(auth::Authorization,
                         path::String)::
     Union{Error, Tuple{FileMetadata, Vector{UInt8}}}
@@ -263,8 +284,10 @@ end
 
 
 
+export WriteMode
 @enum WriteMode add overwrite # update
 
+export files_upload
 function files_upload(auth::Authorization,
                       path::String,
                       content::Vector{UInt8})::Union{Error, FileMetadata}
@@ -284,6 +307,7 @@ end
 
 
 
+export Name
 struct Name
     given_name::String
     surname::String
@@ -298,6 +322,7 @@ Name(d::Dict) = Name(
     d["display_name"],
     d["abbreviated_name"],)
 
+export AccountType
 @enum AccountType basic pro business
 AccountType(d::Dict) = Dict(
     "basic" => basic,
@@ -305,12 +330,14 @@ AccountType(d::Dict) = Dict(
     "business" => business,
 )[d[".tag"]]
 
+export RootInfo
 abstract type RootInfo end
 RootInfo(d::Dict) = Dict(
     "team" => TeamRootInfo,
     "user" => UserRootInfo,
 )[d[".tag"]](d)
 
+export TeamRootInfo
 struct TeamRootInfo <: RootInfo
     root_namespace_id::String
     home_namespace_id::String
@@ -322,6 +349,7 @@ TeamRootInfo(d::Dict) = TeamRootInfo(
     d["home_path"],
 )
 
+export UserRootInfo
 struct UserRootInfo <: RootInfo
     root_namespace_id::String
     home_namespace_id::String
@@ -331,18 +359,21 @@ UserRootInfo(d::Dict) = UserRootInfo(
     d["home_namespace_id"],
 )
 
+export SharedFolderMemberPolicy
 @enum SharedFolderMemberPolicy team anyone
 SharedFolderMemberPolicy(d::Dict) = Dict(
     "team" => team,
     "anyone" => anyone,
 )[d[".tag"]]
 
+export SharedFolderJoinPolicy
 @enum SharedFolderJoinPolicy from_team_only from_anyone
 SharedFolderJoinPolicy(d::Dict) = Dict(
     "from_team_only" => from_team_only,
     "from_anyone" => from_anyone,
 )[d[".tag"]]
 
+export SharedLinkCreatePolicy
 @enum SharedLinkCreatePolicy default_public default_team_only team_only
 SharedLinkCreatePolicy(d::Dict) = Dict(
     "default_public" => default_public,
@@ -350,6 +381,7 @@ SharedLinkCreatePolicy(d::Dict) = Dict(
     "team_only" => team_only,
 )[d[".tag"]]
 
+export TeamSharingPolicies
 struct TeamSharingPolicies
     shared_folder_member_policy::SharedFolderMemberPolicy
     shared_folder_join_policy::SharedFolderJoinPolicy
@@ -361,12 +393,14 @@ TeamSharingPolicies(d::Dict) = TeamSharingPolicies(
     SharedLinkCreatePolicy(d["shared_link_create_policy"]),
 )
 
+export OfficeAddInPolicy
 @enum OfficeAddInPolicy disabled enabled
 OfficeAddInPolicy(d::Dict) = Dict(
     "disabled" => disabled,
     "enabled" => enabled,
 )[d[".tag"]]
 
+export FullTeam
 struct FullTeam
     id::String
     name::String
@@ -380,6 +414,7 @@ FullTeam(d::Dict) = FullTeam(
     OfficeAddInPolicy(d["office_addin_policy"]),
 )
 
+export FullAccount
 struct FullAccount
     account_id::String
     name::Name
@@ -413,6 +448,7 @@ FullAccount(d::Dict) = FullAccount(
     get(d, "team_member_id", nothing),
 )
 
+export users_get_current_account
 function users_get_current_account(auth::Authorization)::
     Union{Error, FullAccount}
     res = post_rpc(auth, "users/get_current_account")
@@ -422,12 +458,14 @@ end
 
 
 
+export SpaceAllocation
 abstract type SpaceAllocation end
 SpaceAllocation(d::Dict) = Dict(
     "individual" => IndividualSpaceAllocation,
     "team" => TeamSpaceAllocation,
 )[d[".tag"]](d)
 
+export IndividualSpaceAllocation
 struct IndividualSpaceAllocation <: SpaceAllocation
     allocated::Int64
 end
@@ -435,6 +473,7 @@ IndividualSpaceAllocation(d::Dict) = IndividualSpaceAllocation(
     d["allocated"],
 )
 
+export MemberSpaceLimitType
 @enum MemberSpaceLimitType off alert_only stop_sync
 MemberSpaceLimitType(d::Dict) = Dict(
     "off" => off,
@@ -442,6 +481,7 @@ MemberSpaceLimitType(d::Dict) = Dict(
     "stop_sync" => stop_sync,
 )[d[".tag"]]
 
+export TeamSpaceAllocation
 struct TeamSpaceAllocation <: SpaceAllocation
     used::Int64
     allocated::Int64
@@ -455,6 +495,7 @@ TeamSpaceAllocation(d::Dict) = TeamSpaceAllocation(
     MemberSpaceLimitType(d["user_within_team_space_limit_type"]),
 )
 
+export SpaceUsage
 struct SpaceUsage
     used::Int64
     allocation::SpaceAllocation
@@ -464,70 +505,11 @@ SpaceUsage(d::Dict) = SpaceUsage(
     SpaceAllocation(d["allocation"]),
 )
 
+export users_get_space_usage
 function users_get_space_usage(auth::Authorization)::Union{Error, SpaceUsage}
     res = post_rpc(auth, "users/get_space_usage")
     if res isa Error return res end
     return SpaceUsage(res)
-end
-
-
-
-function main()
-    auth = read_authorization()
-
-    println("Getting current account...")
-    account = users_get_current_account(auth)
-    first = account.name.given_name
-    last = account.name.surname
-    display = account.name.display_name
-    println("    account: name: $first $last ($display)")
-
-    println("Getting space usage...")
-    usage = users_get_space_usage(auth)
-    used = usage.used
-    println("    usage: $(round(Int, used / 1.0e9)) GByte")
-
-    filename(entry) =
-        entry.path_display === nothing ? entry.name : entry.path_display
-
-    println("Listing folder...")
-    entries = files_list_folder(auth, "", recursive=true)
-    for (i,entry) in enumerate(entries)
-        println("    $i: $(filename(entry))")
-    end
-
-    println("Creating folder...")
-    files_create_folder(auth, "/folder")
-
-    println("Listing folder...")
-    entries = files_list_folder(auth, "", recursive=true)
-    for (i,entry) in enumerate(entries)
-        println("    $i: $(filename(entry))")
-    end
-
-    println("Uploading file...")
-    files_upload(auth, "/folder/file", Vector{UInt8}("Hello, World!\n"))
-
-    println("Listing folder...")
-    entries = files_list_folder(auth, "", recursive=true)
-    for (i,entry) in enumerate(entries)
-        println("    $i: $(filename(entry))")
-    end
-
-    println("Downloading file...")
-    metadata, content = files_download(auth, "/folder/file")
-    @assert String(content) == "Hello, World!\n"
-
-    println("Deleting folder...")
-    files_delete(auth, "/folder")
-
-    println("Listing folder...")
-    entries = files_list_folder(auth, "", recursive=true)
-    for (i,entry) in enumerate(entries)
-        println("    $i: $(filename(entry))")
-    end
-
-    println("Done.")
 end
 
 end
