@@ -61,6 +61,50 @@ end
     @test String(content) == "Hello, World!\n"
 end
 
+@testset "Upload empty file" begin
+    files_upload(auth, "/$folder/file0", Vector{UInt8}(""))
+    entries = files_list_folder(auth, "/$folder", recursive=true)
+    @test count(entry -> startswith(filename(entry), "/$folder"), entries) == 3
+    @test count(entry -> filename(entry) == "/$folder", entries) == 1
+    @test count(entry -> filename(entry) == "/$folder/file0", entries) == 1
+end
+
+@testset "Download empty file" begin
+    metadata, content = files_download(auth, "/$folder/file0")
+    @test filename(metadata) == "/$folder/file0"
+    @test String(content) == ""
+end
+
+@testset "Upload file via session" begin
+    content = map(Vector{UInt8}, ["Hello, ","World!\n"])
+    files_upload(auth, "/$folder/file1", Iterators.Stateful(content))
+    entries = files_list_folder(auth, "/$folder", recursive=true)
+    @test count(entry -> startswith(filename(entry), "/$folder"), entries) == 4
+    @test count(entry -> filename(entry) == "/$folder", entries) == 1
+    @test count(entry -> filename(entry) == "/$folder/file1", entries) == 1
+end
+
+@testset "Download file" begin
+    metadata, content = files_download(auth, "/$folder/file1")
+    @test filename(metadata) == "/$folder/file1"
+    @test String(content) == "Hello, World!\n"
+end
+
+@testset "Upload empty file via session" begin
+    content = map(Vector{UInt8}, ["Hello, ","World!\n"])
+    files_upload(auth, "/$folder/file2", Iterators.Stateful(content))
+    entries = files_list_folder(auth, "/$folder", recursive=true)
+    @test count(entry -> startswith(filename(entry), "/$folder"), entries) == 5
+    @test count(entry -> filename(entry) == "/$folder", entries) == 1
+    @test count(entry -> filename(entry) == "/$folder/file2", entries) == 1
+end
+
+@testset "Download empty file" begin
+    metadata, content = files_download(auth, "/$folder/file2")
+    @test filename(metadata) == "/$folder/file2"
+    @test String(content) == "Hello, World!\n"
+end
+
 @testset "Delete folder" begin
     files_delete(auth, "/$folder")
     entries = files_list_folder(auth, "", recursive=true)

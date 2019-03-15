@@ -1,5 +1,6 @@
 module DropboxSDK
 
+# using Base.Iterators
 using ConfParser
 using HTTP
 using JSON
@@ -84,7 +85,8 @@ end
 function post_content_upload(auth::Authorization,
                              fun::String,
                              args::Union{Nothing, Dict},
-                             content::Vector{UInt8})::Union{Error, Dict}
+                             content::Vector{UInt8})::
+    Union{Error, Nothing, Dict}
     headers = ["Authorization" => "Bearer $(auth.access_token)",
                ]
     push!(headers, "Dropbox-API-Arg" => JSON.json(args))
@@ -124,7 +126,6 @@ function post_content_download(auth::Authorization,
                          dicttype=Dict, inttype=Int64)
         return res, resp.body
     catch ex
-        @show ex
         ex::HTTP.StatusError
         resp = ex.response
         res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
@@ -303,6 +304,73 @@ function files_upload(auth::Authorization,
     res = post_content_upload(auth, "files/upload", args, content)
     if res isa Error return res end
     return FileMetadata(res)
+end
+
+function files_upload(auth::Authorization,
+                      path::String,
+                      content::Iterators.Stateful)::Union{Error, FileMetadata}
+    session_id = nothing
+    offset = Int64(0)
+    while !isempty(content)
+        chunk = popfirst!(content)::Vector{UInt8}
+        isempty(chunk) && continue
+        if session_id === nothing
+            args = Dict(
+                "close" => false,
+            )
+            res = post_content_upload(auth, "files/upload_session/start",
+                                      args, chunk)
+            if res isa Error return res end
+            session_id = res["session_id"]
+            offset = offset + length(chunk)
+        else
+            args = Dict(
+                "cursor" => Dict(
+                    "session_id" => session_id,
+                    "offset" => offset,
+                ),
+                "close" => false,
+            )
+            res = post_content_upload(auth, "files/upload_session/append_v2",
+                                      args, chunk)
+            if res isa Error return res end
+            offset = offset + length(chunk)
+        end
+    end
+    if session_id !== nothing
+        # args = Dict(
+        #     "cursor" => Dict(
+        #         "session_id" => session_id,
+        #         "offset" => offset,
+        #     ),
+        #     "close" => true,
+        # )
+        # res = post_content_upload(auth, "files/upload_session/append_v2",
+        #                           args, UInt8[])
+        # if res isa Error return res end
+        args = Dict(
+            "cursor" => Dict(
+                "session_id" => session_id,
+                "offset" => offset,
+            ),
+            "commit" => Dict(
+                "path" => path,
+                "mode" => add,
+                "autorename" => false,
+                # "client_modified"
+                "mute" => false,
+                # "property_groups"
+                "strict_conflict" => false,
+            ),
+        )
+        res = post_content_upload(auth, "files/upload_session/finish",
+                                  args, UInt8[])
+        if res isa Error return res end
+        return FileMetadata(res)
+    end
+    # The file was empty
+    @assert offset = 0
+    return files_upload(auth, path, UInt8[])
 end
 
 
