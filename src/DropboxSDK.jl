@@ -7,6 +7,13 @@ using JSON
 
 
 
+"""
+    mapget(fun::Function, dict::Dict, key, def=nothing)
+
+Get an entry from a dictionary, and apply the function `fun` to the
+result. If the key `key` is missing from the dictionary, return the
+default value `def`.
+"""
 function mapget(fun::Function, dict::Dict, key, def=nothing)
     value = get(dict, key, nothing)
     if value === nothing return def end
@@ -20,6 +27,14 @@ end
 
 
 export Error
+"""
+    struct Error
+        dict::Dict{String, Any}
+    end
+
+Return value if a request failed. The content is a dictionary
+containing the parsed JSON error response.
+"""
 struct Error
     dict::Dict{String, Any}
 end
@@ -27,11 +42,28 @@ end
 
 
 export Authorization
+"""
+    struct Authorization
+        access_token::String
+    end
+
+Contains an access token. Almost all Dropbox API functions require
+such a token. Access tokens are like passwords and should be treated
+with the same care.
+"""
 struct Authorization
     access_token::String
 end
 
 export get_authorization
+"""
+    get_authorization()::Authorization
+
+Get an authorization token. This function first looks for an
+environment values `DROPBOXSDK_ACCESS_TOKEN`, and then for a file
+`secrets.http` in the current directory. If neither exists, this is an
+error.
+"""
 function get_authorization()::Authorization
     access_token = nothing
     if access_token === nothing
@@ -54,6 +86,13 @@ end
 
 
 
+"""
+    post_rpc(auth::Authorization,
+             fun::String,
+             args::Union{Nothing, Dict} = nothing)::Union{Error, Dict}
+
+Post an RPC request to the Dropbox API.
+"""
 function post_rpc(auth::Authorization,
                   fun::String,
                   args::Union{Nothing, Dict} = nothing)::Union{Error, Dict}
@@ -72,6 +111,7 @@ function post_rpc(auth::Authorization,
         res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
         return res
     catch ex
+        @show ex
         ex::HTTP.StatusError
         resp = ex.response
         res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
@@ -82,11 +122,20 @@ end
 
 
 
+"""
+    post_content_upload(auth::Authorization,
+                        fun::String,
+                        args::Union{Nothing, Dict} = nothing
+                       )::Union{Error, Dict}
+
+Post a Content Upload request to the Dropbox API.
+"""
 function post_content_upload(auth::Authorization,
                              fun::String,
                              args::Union{Nothing, Dict},
                              content::Vector{UInt8})::
     Union{Error, Nothing, Dict}
+
     headers = ["Authorization" => "Bearer $(auth.access_token)",
                ]
     push!(headers, "Dropbox-API-Arg" => JSON.json(args))
@@ -109,10 +158,18 @@ end
 
 
 
+"""
+    post_content_download(auth::Authorization,
+                          fun::String,
+                          args::Union{Nothing, Dict} = nothing)::Union{Error, Dict}
+
+Post a Content Download request to the Dropbox API.
+"""
 function post_content_download(auth::Authorization,
                                fun::String,
                                args::Union{Nothing, Dict})::
     Union{Error, Tuple{Dict, Vector{UInt8}}}
+
     headers = ["Authorization" => "Bearer $(auth.access_token)",
                ]
     push!(headers, "Dropbox-API-Arg" => JSON.json(args))
@@ -141,6 +198,13 @@ end
 
 
 export files_create_folder
+"""
+    files_create_folder(auth::Authorization,
+                        path::String
+                       )::Union{Error, Nothing}
+
+Create a folder `path`.
+"""
 function files_create_folder(auth::Authorization,
                              path::String)::Union{Error, Nothing}
     args = Dict(
@@ -254,6 +318,7 @@ function files_list_folder(auth::Authorization,
                            path::String;
                            recursive::Bool = false)::
     Union{Error, Vector{Metadata}}
+
     args = Dict(
         "path" => path,
         "recursive" => recursive,
@@ -274,6 +339,7 @@ export files_download
 function files_download(auth::Authorization,
                         path::String)::
     Union{Error, Tuple{FileMetadata, Vector{UInt8}}}
+
     args = Dict(
         "path" => path,
     )
@@ -306,13 +372,31 @@ function files_upload(auth::Authorization,
     return FileMetadata(res)
 end
 
+export StatefulIterator
+struct StatefulIterator{T}
+    # A stateful iterator that returns values of type T
+    iterator::Iterators.Stateful{C, Union{Nothing, Tuple{T, S}}} where {C, S}
+    # function StatefulIterator{T}(
+    #     iter::Iterators.Stateful{C, Union{Nothing, Tuple{T, S}}}) where
+    #     {T, C, S}
+    #     
+    #     return new{T, C, S}(iter)
+    # end
+    function StatefulIterator{T}(coll) where {T}
+        return new{T}(Iterators.Stateful(coll))
+    end
+end
+
+export ContentIterator
+const ContentIterator = StatefulIterator{Vector{UInt8}}
+
 function files_upload(auth::Authorization,
                       path::String,
-                      content::Iterators.Stateful)::Union{Error, FileMetadata}
+                      content::ContentIterator)::Union{Error, FileMetadata}
     session_id = nothing
     offset = Int64(0)
-    while !isempty(content)
-        chunk = popfirst!(content)::Vector{UInt8}
+    while !isempty(content.iterator)
+        chunk = popfirst!(content.iterator)::Vector{UInt8}
         isempty(chunk) && continue
         if session_id === nothing
             args = Dict(
@@ -338,6 +422,7 @@ function files_upload(auth::Authorization,
         end
     end
     if session_id !== nothing
+        # We don't need to close the session
         # args = Dict(
         #     "cursor" => Dict(
         #         "session_id" => session_id,
@@ -371,6 +456,128 @@ function files_upload(auth::Authorization,
     # The file was empty
     @assert offset = 0
     return files_upload(auth, path, UInt8[])
+end
+
+function files_upload(
+    auth::Authorization,
+    contents::StatefulIterator{Tuple{String, ContentIterator}})::
+    Union{Error, Vector{Union{Error, FileMetadata}}}
+    
+    # TODO: Define Cursor (and Commit) structs instead
+    paths = String[]
+    session_ids = String[]
+    offsets = Int64[]
+    # TODO: can handle only 1000 files at once
+    # TODO: parallelize loop
+    for (path, content) in contents.iterator
+
+        session_id = nothing
+        offset = Int64(0)
+        while !isempty(content.iterator)
+            chunk = popfirst!(content.iterator)::Vector{UInt8}
+            isempty(chunk) && continue
+            if session_id === nothing
+                args = Dict(
+                    "close" => false,
+                )
+                res = post_content_upload(auth, "files/upload_session/start",
+                                          args, chunk)
+                if res isa Error return res end
+                session_id = res["session_id"]
+                offset = offset + length(chunk)
+            else
+                args = Dict(
+                    "cursor" => Dict(
+                        "session_id" => session_id,
+                        "offset" => offset,
+                    ),
+                    "close" => false,
+                )
+                res = post_content_upload(auth,
+                                          "files/upload_session/append_v2",
+                                          args, chunk)
+                if res isa Error return res end
+                offset = offset + length(chunk)
+            end
+        end
+        # TODO: We need to close only the last session
+        if session_id === nothing
+            # The file is empty
+            @assert offset == 0
+            args = Dict(
+                "close" => true,
+            )
+            res = post_content_upload(auth, "files/upload_session/start",
+                                      args, UInt8[])
+            if res isa Error return res end
+            session_id = res["session_id"]
+        else
+            args = Dict(
+                "cursor" => Dict(
+                    "session_id" => session_id,
+                    "offset" => offset,
+                ),
+                "close" => true,
+            )
+            res = post_content_upload(auth, "files/upload_session/append_v2",
+                                      args, UInt8[])
+            if res isa Error return res end
+        end
+
+        push!(paths, path)
+        push!(session_ids, session_id)
+        push!(offsets, offset)
+    end
+
+    if isempty(paths)
+        # We uploaded zero files
+        return Union{Error, FileMetadata}[]
+    end
+
+    entries = []
+    for (path, session_id, offset) in zip(paths, session_ids, offsets)
+        args = Dict(
+            "cursor" => Dict(
+                "session_id" => session_id,
+                "offset" => offset,
+            ),
+            "commit" => Dict(
+                "path" => path,
+                "mode" => add,
+                "autorename" => false,
+                # "client_modified"
+                "mute" => false,
+                # "property_groups"
+                "strict_conflict" => false,
+            ),
+        )
+        push!(entries, args)
+    end
+    args = Dict(
+        "entries" => entries,
+    )
+    res = post_rpc(auth, "files/upload_session/finish_batch", args)
+    if res isa Error return res end
+    async_job_id = res["async_job_id"]
+
+    is_in_progress = true    
+    delay = 1.0                 # seconds
+    while is_in_progress
+        sleep(delay)
+        delay = min(60.0, 2.0 * delay) # exponential back-off
+        args = Dict(
+            "async_job_id" => async_job_id,
+        )
+        res = post_rpc(auth, "files/upload_session/finish_batch/check", args)
+        if res isa Error return res end
+        is_in_progress = res[".tag"] == "in_progress"
+    end
+    @assert res[".tag"] == "complete"
+
+    return Union{Error, FileMetadata}[
+        entry[".tag"] == "success" ? FileMetadata(entry) : Error(entry)
+        for entry in res["entries"]
+    ]
 end
 
 
@@ -519,6 +726,7 @@ FullAccount(d::Dict) = FullAccount(
 export users_get_current_account
 function users_get_current_account(auth::Authorization)::
     Union{Error, FullAccount}
+
     res = post_rpc(auth, "users/get_current_account")
     if res isa Error return res end
     return FullAccount(res)

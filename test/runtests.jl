@@ -1,7 +1,17 @@
+using Dates
 using Test
 using UUIDs
 
 using DropboxSDK
+
+
+
+const folder = "test-$(now())-$(UUIDs.uuid4())"
+println("Using folder \"$folder\" for testing")
+
+filename(entry) =
+    entry.path_display === nothing ? entry.name : entry.path_display
+
 
 
 @testset "Get authorization" begin
@@ -28,85 +38,131 @@ end
     @test used >= 0
 end
 
-const folder = "test-$(UUIDs.uuid4())"
-filename(entry) =
-    entry.path_display === nothing ? entry.name : entry.path_display
-
 @testset "List folder" begin
     entries = files_list_folder(auth, "", recursive=true)
     # for (i,entry) in enumerate(entries)
     #     println("    $i: $(filename(entry))")
     # end
-    @test count(entry -> startswith(filename(entry), "/$folder"), entries) == 0
+    @test count(entry -> startswith(entry.path_display, "/$folder"),
+                entries) == 0
 end
 
 @testset "Create folder" begin
     files_create_folder(auth, "/$folder")
     entries = files_list_folder(auth, "", recursive=true)
-    @test count(entry -> startswith(filename(entry), "/$folder"), entries) == 1
-    @test count(entry -> filename(entry) == "/$folder", entries) == 1
+    @test count(entry -> startswith(entry.path_display, "/$folder"),
+                entries) == 1
+    @test count(entry -> entry.path_display == "/$folder", entries) == 1
 end
 
 @testset "Upload file" begin
-    files_upload(auth, "/$folder/file", Vector{UInt8}("Hello, World!\n"))
+    metadata =
+        files_upload(auth, "/$folder/file", Vector{UInt8}("Hello, World!\n"))
+    @test metadata isa FileMetadata
     entries = files_list_folder(auth, "/$folder", recursive=true)
-    @test count(entry -> startswith(filename(entry), "/$folder"), entries) == 2
-    @test count(entry -> filename(entry) == "/$folder", entries) == 1
-    @test count(entry -> filename(entry) == "/$folder/file", entries) == 1
+    @test count(entry -> startswith(entry.path_display, "/$folder"),
+                entries) == 2
+    @test count(entry -> entry.path_display == "/$folder", entries) == 1
+    @test count(entry -> entry.path_display == "/$folder/file", entries) == 1
 end
 
 @testset "Download file" begin
     metadata, content = files_download(auth, "/$folder/file")
-    @test filename(metadata) == "/$folder/file"
+    @test metadata.path_display == "/$folder/file"
     @test String(content) == "Hello, World!\n"
 end
 
 @testset "Upload empty file" begin
-    files_upload(auth, "/$folder/file0", Vector{UInt8}(""))
+    metadata = files_upload(auth, "/$folder/file0", Vector{UInt8}(""))
+    @test metadata isa FileMetadata
     entries = files_list_folder(auth, "/$folder", recursive=true)
-    @test count(entry -> startswith(filename(entry), "/$folder"), entries) == 3
-    @test count(entry -> filename(entry) == "/$folder", entries) == 1
-    @test count(entry -> filename(entry) == "/$folder/file0", entries) == 1
+    @test count(entry -> startswith(entry.path_display, "/$folder"),
+                entries) == 3
+    @test count(entry -> entry.path_display == "/$folder", entries) == 1
+    @test count(entry -> entry.path_display == "/$folder/file0", entries) == 1
 end
 
 @testset "Download empty file" begin
     metadata, content = files_download(auth, "/$folder/file0")
-    @test filename(metadata) == "/$folder/file0"
+    @test metadata.path_display == "/$folder/file0"
     @test String(content) == ""
 end
 
 @testset "Upload file via session" begin
     content = map(Vector{UInt8}, ["Hello, ","World!\n"])
-    files_upload(auth, "/$folder/file1", Iterators.Stateful(content))
+    metadata = files_upload(auth, "/$folder/file1", ContentIterator(content))
+    @test metadata isa FileMetadata
     entries = files_list_folder(auth, "/$folder", recursive=true)
-    @test count(entry -> startswith(filename(entry), "/$folder"), entries) == 4
-    @test count(entry -> filename(entry) == "/$folder", entries) == 1
-    @test count(entry -> filename(entry) == "/$folder/file1", entries) == 1
+    @test count(entry -> startswith(entry.path_display, "/$folder"),
+                entries) == 4
+    @test count(entry -> entry.path_display == "/$folder", entries) == 1
+    @test count(entry -> entry.path_display == "/$folder/file1", entries) == 1
 end
 
 @testset "Download file" begin
     metadata, content = files_download(auth, "/$folder/file1")
-    @test filename(metadata) == "/$folder/file1"
+    @test metadata.path_display == "/$folder/file1"
     @test String(content) == "Hello, World!\n"
 end
 
 @testset "Upload empty file via session" begin
     content = map(Vector{UInt8}, ["Hello, ","World!\n"])
-    files_upload(auth, "/$folder/file2", Iterators.Stateful(content))
+    metadata = files_upload(auth, "/$folder/file2", ContentIterator(content))
+    @test metadata isa FileMetadata
     entries = files_list_folder(auth, "/$folder", recursive=true)
-    @test count(entry -> startswith(filename(entry), "/$folder"), entries) == 5
-    @test count(entry -> filename(entry) == "/$folder", entries) == 1
-    @test count(entry -> filename(entry) == "/$folder/file2", entries) == 1
+    @test count(entry -> startswith(entry.path_display, "/$folder"),
+                entries) == 5
+    @test count(entry -> entry.path_display == "/$folder", entries) == 1
+    @test count(entry -> entry.path_display == "/$folder/file2", entries) == 1
 end
 
 @testset "Download empty file" begin
     metadata, content = files_download(auth, "/$folder/file2")
-    @test filename(metadata) == "/$folder/file2"
+    @test metadata.path_display == "/$folder/file2"
     @test String(content) == "Hello, World!\n"
+end
+
+const numfiles = 4
+@testset "Upload several files" begin
+    chunk = Vector{UInt8}("Hello, World!\n")
+    contents = StatefulIterator{Tuple{String, ContentIterator}}(
+        ("/$folder/files$i", ContentIterator(Iterators.repeated(chunk, i)))
+        for i in 0:numfiles-1)
+    metadatas = files_upload(auth, contents)
+    @test length(metadatas) == numfiles
+    @test all(metadata isa FileMetadata for metadata in metadatas)
+    entries = files_list_folder(auth, "/$folder", recursive=true)
+    @test count(entry -> startswith(entry.path_display, "/$folder"),
+                entries) == numfiles + 5
+    @test count(entry -> entry.path_display == "/$folder", entries) == 1
+    for i in 0:numfiles-1
+        @test count(entry -> entry.path_display == "/$folder/files$i",
+                    entries) == 1
+    end
+end
+
+@testset "Download files" begin
+    for i in 0:numfiles-1
+        metadata, content = files_download(auth, "/$folder/files$i")
+        @test metadata.path_display == "/$folder/files$i"
+        @test String(content) == repeat("Hello, World!\n", i)
+    end
+end
+
+@testset "Upload zero files" begin
+    contents = StatefulIterator{Tuple{String, ContentIterator}}(
+        Tuple{String, ContentIterator}[]
+    )
+    metadatas = files_upload(auth, contents)
+    @test isempty(metadatas)
+    entries = files_list_folder(auth, "/$folder", recursive=true)
+    @test count(entry -> startswith(entry.path_display, "/$folder"),
+                entries) == numfiles + 5
 end
 
 @testset "Delete folder" begin
     files_delete(auth, "/$folder")
     entries = files_list_folder(auth, "", recursive=true)
-    @test count(entry -> startswith(filename(entry), "/$folder"), entries) == 0
+    @test count(entry -> startswith(entry.path_display, "/$folder"),
+                entries) == 0
 end
