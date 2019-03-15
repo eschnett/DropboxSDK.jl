@@ -217,6 +217,45 @@ end
 
 
 
+export ContentHashState
+mutable struct ContentHashState
+    chunksums::Vector{UInt8}
+    # TODO: Don't buffer the data; instead, use SHA256_CTX to handle
+    # partial chunks
+    buffer::Vector{UInt8}
+
+    ContentHashState() = new(UInt8[], UInt8[])
+end
+
+export calc_content_hash_init
+function calc_content_hash_init()::ContentHashState
+    ContentHashState()
+end
+
+export calc_content_hash_add!
+function calc_content_hash_add!(cstate::ContentHashState,
+                                data::AbstractVector{UInt8})::Nothing
+    append!(cstate.buffer, data)
+    chunksize = 4 * 1024 * 1024
+    len = length(cstate.buffer)
+    if len >= chunksize
+        for offset in 1:chunksize:len
+            chunk = @view cstate.buffer[offset : min(offset+chunksize-1, len)]
+            append!(cstate.chunksums, sha256(chunk))
+        end
+        newlen = mod(len, chunksize)
+        cstate.buffer = cstate.buffer[end-newlen+1 : end]
+    end
+end
+
+export calc_content_hash_get
+function calc_content_hash_get(cstate::ContentHashState)::String
+    extra = isempty(cstate.buffer) ? UInt8[] : sha256(cstate.buffer)
+    bytes2hex(sha256(UInt8[cstate.chunksums; extra]))
+end
+
+
+
 export files_create_folder
 """
     files_create_folder(auth::Authorization,
@@ -444,16 +483,16 @@ function files_upload(auth::Authorization,
     return metadata
 end
 
+
+
 export StatefulIterator
+"""
+    struct StatefulIterator{T}
+
+A stateful iterator that returns values of type `T`.
+"""
 struct StatefulIterator{T}
-    # A stateful iterator that returns values of type T
     iterator::Iterators.Stateful{C, Union{Nothing, Tuple{T, S}}} where {C, S}
-    # function StatefulIterator{T}(
-    #     iter::Iterators.Stateful{C, Union{Nothing, Tuple{T, S}}}) where
-    #     {T, C, S}
-    #     
-    #     return new{T, C, S}(iter)
-    # end
     function StatefulIterator{T}(coll) where {T}
         return new{T}(Iterators.Stateful(coll))
     end
@@ -467,6 +506,7 @@ function files_upload(auth::Authorization,
                       content::ContentIterator)::Union{Error, FileMetadata}
     session_id = nothing
     offset = Int64(0)
+    cstate = calc_content_hash_init()
     while !isempty(content.iterator)
         chunk = popfirst!(content.iterator)::Vector{UInt8}
         isempty(chunk) && continue
@@ -478,7 +518,6 @@ function files_upload(auth::Authorization,
                                       args, chunk)
             if res isa Error return res end
             session_id = res["session_id"]
-            offset = offset + length(chunk)
         else
             args = Dict(
                 "cursor" => Dict(
@@ -490,25 +529,16 @@ function files_upload(auth::Authorization,
             res = post_content_upload(auth, "files/upload_session/append_v2",
                                       args, chunk)
             if res isa Error return res end
-            offset = offset + length(chunk)
         end
+        offset = offset + length(chunk)
+        calc_content_hash_add!(cstate, chunk)
     end
     if session_id === nothing
         # The file was empty
         @assert offset = 0
         metadata = files_upload(auth, path, UInt8[])
     else
-        # We don't need to close the session
-        # args = Dict(
-        #     "cursor" => Dict(
-        #         "session_id" => session_id,
-        #         "offset" => offset,
-        #     ),
-        #     "close" => true,
-        # )
-        # res = post_content_upload(auth, "files/upload_session/append_v2",
-        #                           args, UInt8[])
-        # if res isa Error return res end
+        # Note: We don't need to close the session, so we skip this step
         args = Dict(
             "cursor" => Dict(
                 "session_id" => session_id,
@@ -530,8 +560,16 @@ function files_upload(auth::Authorization,
         metadata = FileMetadata(res)
     end
 
+    # Check content hash
+    content_hash = calc_content_hash_get(cstate)
+    if metadata.content_hash != content_hash
+        return Error(Dict("error_summary" => "content hash does not match"))
+    end
+
     return metadata
 end
+
+
 
 function files_upload(
     auth::Authorization,
@@ -542,12 +580,14 @@ function files_upload(
     paths = String[]
     session_ids = String[]
     offsets = Int64[]
+    content_hashes = String[]
     # TODO: can handle only 1000 files at once
     # TODO: parallelize loop
     for (path, content) in contents.iterator
 
         session_id = nothing
         offset = Int64(0)
+        cstate = calc_content_hash_init()
         while !isempty(content.iterator)
             chunk = popfirst!(content.iterator)::Vector{UInt8}
             isempty(chunk) && continue
@@ -559,7 +599,6 @@ function files_upload(
                                           args, chunk)
                 if res isa Error return res end
                 session_id = res["session_id"]
-                offset = offset + length(chunk)
             else
                 args = Dict(
                     "cursor" => Dict(
@@ -572,8 +611,9 @@ function files_upload(
                                           "files/upload_session/append_v2",
                                           args, chunk)
                 if res isa Error return res end
-                offset = offset + length(chunk)
             end
+            offset = offset + length(chunk)
+            calc_content_hash_add!(cstate, chunk)
         end
         # TODO: We need to close only the last session
         if session_id === nothing
@@ -602,6 +642,7 @@ function files_upload(
         push!(paths, path)
         push!(session_ids, session_id)
         push!(offsets, offset)
+        push!(content_hashes, calc_content_hash_get(cstate))
     end
 
     if isempty(paths)
@@ -649,10 +690,21 @@ function files_upload(
     end
     @assert res[".tag"] == "complete"
 
-    return Union{Error, FileMetadata}[
-        entry[".tag"] == "success" ? FileMetadata(entry) : Error(entry)
-        for entry in res["entries"]
-    ]
+    metadatas = Union{Error, FileMetadata}[]
+    for (entry, content_hash) in zip(res["entries"], content_hashes)
+        if entry[".tag"] == "success" 
+            metadata = FileMetadata(entry)
+            if metadata.content_hash != content_hash
+                push!(metadatas, Error(Dict("error_summary" =>
+                                            "content hash does not match")))
+            else
+                push!(metadatas, metadata)
+            end
+        else
+            push!(metadatas, Error(entry))
+        end
+    end
+    return metadatas
 end
 
 

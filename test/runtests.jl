@@ -6,7 +6,7 @@ using DropboxSDK
 
 
 
-const folder = "test-$(now())-$(UUIDs.uuid4())"
+const folder = "test-$(now(UTC))-$(UUIDs.uuid4())"
 println("Using folder \"$folder\" for testing")
 
 filename(entry) =
