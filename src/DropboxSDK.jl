@@ -25,9 +25,18 @@ struct Authorization
 end
 
 function read_authorization()::Authorization
-    conf = ConfParse("secrets.http")
-    parse_conf!(conf)
-    access_token = retrieve(conf, "access_token")
+    access_token = nothing
+    if access_token === nothing
+        access_token = get(ENV, "DROPBOXSDK_ACCESS_TOKEN", nothing)
+    end
+    if access_token === nothing
+        conf = ConfParse("secrets.http")
+        parse_conf!(conf)
+        access_token = retrieve(conf, "access_token")
+    end
+    if access_token === nothing
+        println("Error: Could not find access token for Dropbxo")
+    end
     Authorization(access_token)
 end
 
