@@ -17,16 +17,32 @@ add_arg_table(
                :action => :command),
     "mkdir", Dict(:help => "create new folder",
                   :action => :command),
+    "rm", Dict(:help => "delete file or folder",
+               :action => :command),
 )
 
 add_arg_table(
     arg_settings["ls"],
-    ["--long", "-l"], Dict(:help => "Use a long (detailed) format",
+    ["--long", "-l"], Dict(:help => "use a long (detailed) format",
                            :nargs => 0),
-    ["--recursive", "-R"], Dict(:help => "Recursively list subfolders",
+    ["--recursive", "-R"], Dict(:help => "recursively list subfolders",
                                 :nargs => 0),
-    "filename", Dict(:help => "file name",
+    "filename", Dict(:help => "file or folder name",
                      :nargs => '*'),
+)
+
+add_arg_table(
+    arg_settings["mkdir"],
+    "foldername", Dict(:help => "name of folder to create",
+                       :nargs => '*'),
+)
+
+add_arg_table(
+    arg_settings["rm"],
+    "filename", Dict(:help => "name of file or folder to remove",
+                     :nargs => '*'),
+    ["--recursive", "-r"], Dict(:help => "recursively delete subfolders",
+                                :nargs => 0),
 )
 
 
@@ -104,6 +120,9 @@ function metadata_path(metadata, prefix)
     if startswith(path, "/")
         path = path[2:end]
     end
+    if path == ""
+        path = "."
+    end
     path
 end
 
@@ -129,8 +148,8 @@ function cmd_ls(args)
         # Distinguish between files and folders
         metadata = files_get_metadata(auth, filename)
         if metadata isa Error
-            println("$(quote_string(isempty(filename) ? "/" : filename)):",
-                    " no such file or directory")
+            println("$(quote_string(filename)):",
+                    " $(metadata.dict["error_summary"])")
             continue
         elseif metadata isa FolderMetadata
             metadatas = files_list_folder(auth, filename, recursive=recursive)
@@ -141,7 +160,7 @@ function cmd_ls(args)
         # Output directory name if there are multiple directories
         if metadata isa FolderMetadata && length(filenames) > 1
             println()
-            println("$(quote_string(isempty(filename) ? "/" : filename)):")
+            println("$(quote_string(filename)):")
         end
 
         # Output
@@ -169,9 +188,59 @@ end
 
 
 
+function cmd_mkdir(args)
+    foldernames = args["foldername"]
+
+    auth = get_authorization()
+    for foldername in foldernames
+
+        # Add leading and remove trailing slashes
+        if !startswith(foldername, "/")
+            foldername = "/" * foldername
+        end
+        while endswith(foldername, "/")
+            foldername = foldername[1:end-1]
+        end
+
+        res = files_create_folder(auth, foldername)
+        if res isa Error
+            println("$(quote_string(foldername)): $(res.dict["error_summary"])")
+        end
+
+    end
+end
+
+
+
+function cmd_rm(args)
+    filenames = args["filename"]
+
+    auth = get_authorization()
+    for filename in filenames
+
+        # Add leading and remove trailing slashes
+        if !startswith(filename, "/")
+            filename = "/" * filename
+        end
+        while endswith(filename, "/")
+            filename = filename[1:end-1]
+        end
+
+        res = files_delete(auth, filename)
+        if res isa Error
+            println("$(quote_string(filename)): $(res.dict["error_summary"])")
+        end
+
+    end
+end
+
+
+
 const cmds = Dict(
     "account" => cmd_account,
     "ls" => cmd_ls,
+    "mkdir" => cmd_mkdir,
+    "rm" => cmd_rm,
 )
 
 

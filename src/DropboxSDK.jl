@@ -521,8 +521,22 @@ function files_list_folder(auth::Authorization,
     )
     res = post_rpc(auth, "files/list_folder", args)
     if res isa Error return res end
-    @assert !res["has_more"]
-    return Metadata[Metadata(x) for x in res["entries"]]
+    metadatas = Metadata[Metadata(x) for x in res["entries"]]
+    cursor = res["cursor"]
+    has_more = res["has_more"]
+
+    while has_more
+        args = Dict(
+            "cursor" => cursor,
+        )
+        res = post_rpc(auth, "files/list_folder/continue", args)
+        if res isa Error return res end
+        append!(metadatas, Metadata[Metadata(x) for x in res["entries"]])
+        cursor = res["cursor"]
+        has_more = res["has_more"]
+    end
+
+    return metadatas
 end
 
 
