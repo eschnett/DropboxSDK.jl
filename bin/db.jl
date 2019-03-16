@@ -13,21 +13,23 @@ add_arg_table(
     arg_settings,
     "account", Dict(:help => "show account information",
                     :action => :command),
-    "get", Dict(:help => "get files or folders",
+    "get", Dict(:help => "get files or directories",
                 :action => :command),
-    "ls", Dict(:help => "list folder content",
+    "ls", Dict(:help => "list directory content",
                :action => :command),
-    "mkdir", Dict(:help => "create new folder",
+    "mkdir", Dict(:help => "create new directory",
                   :action => :command),
-    "rm", Dict(:help => "delete file or folder",
+    "put", Dict(:help => "put files or directories",
+                :action => :command),
+    "rm", Dict(:help => "delete file or directory",
                :action => :command),
 )
 
 add_arg_table(
     arg_settings["get"],
-    "filename", Dict(:help => "name of file or folder in Dropbox to get",
+    "filename", Dict(:help => "name of Dropbox file or directory to get",
                      :nargs => '*'),
-    "destination", Dict(:help => "local destination file or folder",
+    "destination", Dict(:help => "local destination file or directory",
                         :nargs => 'A'),
 )
 
@@ -35,23 +37,31 @@ add_arg_table(
     arg_settings["ls"],
     ["--long", "-l"], Dict(:help => "use a long (detailed) format",
                            :nargs => 0),
-    ["--recursive", "-R"], Dict(:help => "recursively list subfolders",
+    ["--recursive", "-R"], Dict(:help => "recursively list subdirectories",
                                 :nargs => 0),
-    "filename", Dict(:help => "file or folder name",
+    "filename", Dict(:help => "file or directory name",
                      :nargs => '*'),
 )
 
 add_arg_table(
     arg_settings["mkdir"],
-    "foldername", Dict(:help => "name of folder to create",
+    "directoryname", Dict(:help => "name of directory to create",
                        :nargs => '*'),
 )
 
 add_arg_table(
-    arg_settings["rm"],
-    "filename", Dict(:help => "name of file or folder to remove",
+    arg_settings["put"],
+    "filename", Dict(:help => "name of local file or directory to put",
                      :nargs => '*'),
-    ["--recursive", "-r"], Dict(:help => "recursively delete subfolders",
+    "destination", Dict(:help => "destination Dropbox file or directory",
+                        :nargs => 'A'),
+)
+
+add_arg_table(
+    arg_settings["rm"],
+    "filename", Dict(:help => "name of file or directory to remove",
+                     :nargs => '*'),
+    ["--recursive", "-r"], Dict(:help => "recursively delete subdirectories",
                                 :nargs => 0),
 )
 
@@ -72,7 +82,7 @@ const escape_char = Dict{Char, Char}(
     '\v' => 'v',
 )
 
-function quote_string(str::String)::String
+function quote_string1(str::AbstractString)::String
     buf = IOBuffer()
     for c in str
         if isprint(c) && c != ' '
@@ -94,6 +104,10 @@ function quote_string(str::String)::String
         end
     end
     String(take!(buf))
+end
+
+function quote_string(str::AbstractString)::AbstractString
+    repr(str)[2:end-1]
 end
 
 
@@ -133,10 +147,10 @@ function cmd_get(args)
         end
         @assert !endswith(source, "/")
 
-        # Distinguish between files and folders
+        # Distinguish between files and directories
         if source == ""
-            # The root folder does not support files_get_metadata
-            isfolder = true
+            # The root directory does not support files_get_metadata
+            isdirectory = true
         else
             metadata = files_get_metadata(auth, source)
             if metadata isa Error
@@ -144,16 +158,14 @@ function cmd_get(args)
                         " $(metadata.dict["error_summary"])")
                 continue
             end
-            isfolder = metadata isa FolderMetadata
+            isdirectory = metadata isa FolderMetadata
         end
-        # TODO: Handle sources that are a folder
-        @assert !isfolder
 
         if isdir(destination)
             # If the destination is a directory, the files will be
             # downloaded into that directory.
             filename = joinpath(destination, basename(source))
-        elseif length(sources) == 1
+        elseif length(sources) == 1 && !isdirectory
             # If there is only a single source
             if ispath(destination)
                 # If the destination exists and is not a directory,
@@ -171,6 +183,9 @@ function cmd_get(args)
             # Multiple sources: Destination is not a directory
             @assert false
         end
+
+        # TODO: Handle sources that are a directory
+        @assert !isdirectory
 
         # Compare content hash before downloading
         need_download = true
@@ -255,7 +270,7 @@ function cmd_ls(args)
     auth = get_authorization()
 
     # TODO: Sort filenames by type. First show all Files, then all
-    # Folders prefixed with their names. Also sort everything
+    # Directories prefixed with their names. Also sort everything
     # alphabetically.
     for filename in filenames
 
@@ -267,10 +282,10 @@ function cmd_ls(args)
             filename = filename[1:end-1]
         end
 
-        # Distinguish between files and folders
+        # Distinguish between files and directories
         if filename == ""
-            # The root folder does not support files_get_metadata
-            isfolder = true
+            # The root directory does not support files_get_metadata
+            isdirectory = true
         else
             metadata = files_get_metadata(auth, filename)
             if metadata isa Error
@@ -278,10 +293,10 @@ function cmd_ls(args)
                         " $(metadata.dict["error_summary"])")
                 continue
             end
-            isfolder = metadata isa FolderMetadata
+            isdirectory = metadata isa FolderMetadata
         end
 
-        if isfolder
+        if isdirectory
             metadatas = files_list_folder(auth, filename, recursive=recursive)
             prefix_to_hide = filename
         else
@@ -301,8 +316,9 @@ function cmd_ls(args)
                                for metadata in metadatas)
             size_digits = length(string(max_size))
             for metadata in metadatas
+                isdir = metadata isa FolderMetadata
                 mode = mode_strings[typeof(metadata)]
-                size = metadata_size(metadata)
+                size = isdir ? "" : metadata_size(metadata)
                 modified = metadata_modified(metadata)
                 path = metadata_path(metadata, prefix_to_hide)
                 println("$mode $(lpad(size, size_digits)) $modified",
@@ -321,22 +337,23 @@ end
 
 
 function cmd_mkdir(args)
-    foldernames = args["foldername"]
+    directorynames = args["directoryname"]
 
     auth = get_authorization()
-    for foldername in foldernames
+    for directoryname in directorynames
 
         # Add leading and remove trailing slashes
-        if !startswith(foldername, "/")
-            foldername = "/" * foldername
+        if !startswith(directoryname, "/")
+            directoryname = "/" * directoryname
         end
-        while endswith(foldername, "/")
-            foldername = foldername[1:end-1]
+        while endswith(directoryname, "/")
+            directoryname = directoryname[1:end-1]
         end
 
-        res = files_create_folder(auth, foldername)
+        res = files_create_directory(auth, directoryname)
         if res isa Error
-            println("$(quote_string(foldername)): $(res.dict["error_summary"])")
+            println("$(quote_string(directoryname)):",
+                    " $(res.dict["error_summary"])")
         end
 
     end
