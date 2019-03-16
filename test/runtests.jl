@@ -139,7 +139,7 @@ const numfiles = 4
     contents = StatefulIterator{Tuple{String, ContentIterator}}(
         ("/$folder/files$i", ContentIterator(Iterators.repeated(chunk, i)))
         for i in 0:numfiles-1)
-    metadatas = files_upload(auth, contents)
+    @show metadatas = files_upload(auth, contents)
     @test length(metadatas) == numfiles
     @test all(metadata isa FileMetadata for metadata in metadatas)
     @test all(metadata.size == (i-1) * length("Hello, World!\n")
