@@ -15,6 +15,8 @@ add_arg_table(
                     :action => :command),
     "ls", Dict(:help => "list folder content",
                :action => :command),
+    "mkdir", Dict(:help => "create new folder",
+                  :action => :command),
 )
 
 add_arg_table(
@@ -102,6 +104,7 @@ function metadata_path(metadata, prefix)
     if startswith(path, "/")
         path = path[2:end]
     end
+    path
 end
 
 function cmd_ls(args)
@@ -114,15 +117,34 @@ function cmd_ls(args)
 
     auth = get_authorization()
     for filename in filenames
+
+        # Add leading and remove trailing slashes
+        if !startswith(filename, "/")
+            filename = "/" * filename
+        end
         while endswith(filename, "/")
             filename = filename[1:end-1]
         end
-        
-        if length(filenames) > 1
+
+        # Distinguish between files and folders
+        metadata = files_get_metadata(auth, filename)
+        if metadata isa Error
+            println("$(quote_string(isempty(filename) ? "/" : filename)):",
+                    " no such file or directory")
+            continue
+        elseif metadata isa FolderMetadata
+            metadatas = files_list_folder(auth, filename, recursive=recursive)
+        else
+            metadatas = [metadata]
+        end
+
+        # Output directory name if there are multiple directories
+        if metadata isa FolderMetadata && length(filenames) > 1
             println()
             println("$(quote_string(isempty(filename) ? "/" : filename)):")
         end
-        metadatas = files_list_folder(auth, filename, recursive=recursive)
+
+        # Output
         if long
             max_size = maximum(metadata_size(metadata)
                                for metadata in metadatas)
@@ -132,8 +154,8 @@ function cmd_ls(args)
                 size = metadata_size(metadata)
                 modified = metadata_modified(metadata)
                 path = metadata_path(metadata, filename)
-                println("$mode $(lpad(size, size_digits)) $modified ",
-                        "$(quote_string(path))")
+                println("$mode $(lpad(size, size_digits)) $modified",
+                        " $(quote_string(path))")
             end
         else
             for metadata in metadatas
@@ -157,6 +179,7 @@ const cmds = Dict(
 function main(args)
     println("Julia Dropbox client   ",
             "<https://github.com/eschnett/DropboxSDK.jl>")
+    println()
     opts = parse_args(args, arg_settings)
     cmd = opts["%COMMAND%"]
     fun = cmds[cmd]
