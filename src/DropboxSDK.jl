@@ -842,7 +842,9 @@ function files_upload(
             end
         else
             if entry["failure"][".tag"] == "too_many_write_operations"
-                # TODO: retry only those that failed
+                # TODO: retry only those that failed.
+                # or do they always fail together?
+                # but the docs say to retry only that file.
                 @show res["entries"]
                 @show "sleeping for 1 second..."
                 sleep(1)

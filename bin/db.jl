@@ -13,12 +13,22 @@ add_arg_table(
     arg_settings,
     "account", Dict(:help => "show account information",
                     :action => :command),
+    "get", Dict(:help => "get files or folders",
+                :action => :command),
     "ls", Dict(:help => "list folder content",
                :action => :command),
     "mkdir", Dict(:help => "create new folder",
                   :action => :command),
     "rm", Dict(:help => "delete file or folder",
                :action => :command),
+)
+
+add_arg_table(
+    arg_settings["get"],
+    "filename", Dict(:help => "name of file or folder in Dropbox to get",
+                     :nargs => '*'),
+    "destination", Dict(:help => "local destination file or folder",
+                        :nargs => 'A'),
 )
 
 add_arg_table(
@@ -99,6 +109,114 @@ end
 
 
 
+function cmd_get(args)
+    filenames = args["filename"]
+    if length(filenames) == 0
+        println("Error: No file names given")
+        exit(1)
+    elseif length(filenames) == 1
+        println("Error: Destination missing")
+        exit(1)
+    end
+    # The last file name is the destination
+    @assert !haskey(args, "target")
+    destination = filenames[end]
+    sources = filenames[1:end-1]
+
+    auth = get_authorization()
+
+    for source in sources
+
+        # Add leading and remove trailing slashes
+        if !startswith(source, "/")
+            source = "/$source"
+        end
+        @assert !endswith(source, "/")
+
+        # Distinguish between files and folders
+        if source == ""
+            # The root folder does not support files_get_metadata
+            isfolder = true
+        else
+            metadata = files_get_metadata(auth, source)
+            if metadata isa Error
+                println("$(quote_string(filename)):",
+                        " $(metadata.dict["error_summary"])")
+                continue
+            end
+            isfolder = metadata isa FolderMetadata
+        end
+        # TODO: Handle sources that are a folder
+        @assert !isfolder
+
+        if isdir(destination)
+            # If the destination is a directory, the files will be
+            # downloaded into that directory.
+            filename = joinpath(destination, basename(source))
+        elseif length(sources) == 1
+            # If there is only a single source
+            if ispath(destination)
+                # If the destination exists and is not a directory,
+                # then it is overwritten.
+                @assert !isdirpath(destination)
+                filename = destination
+            else
+                # If the destination does not exist, then a file with
+                # that name will be created.
+                filename = destination
+                pathname = dirname(filename)
+                @assert isdir(pathname)
+            end
+        else
+            # Multiple sources: Destination is not a directory
+            @assert false
+        end
+
+        # Compare content hash before downloading
+        need_download = true
+        if metadata.size == 0
+            open(destination, "w") do io
+                truncate(io, 0)
+            end
+            need_download = false
+        elseif isfile(destination)
+            size = filesize(destination)
+            if size == metadata.size
+                # Don't download if content hash matches
+                content = read(destination)
+                content_hash = calc_content_hash(content)
+                if content_hash == metadata.content_hash
+                    @show "content hash matches; skipping download"
+                    need_download = false
+                end
+            elseif size < metadata.size
+                # TODO: Download only missing fraction
+            else
+                # Truncate if necessary
+                content = read(destination, metadata.size)
+                content_hash = calc_content_hash(content)
+                if content_hash == metadata.content_hash
+                    @show "content hash matches; truncating local file and skipping download"
+                    open(destination, "w") do io
+                        truncate(io, metadata.size)
+                    end
+                    need_download = false
+                end
+            end
+        end
+
+        if need_download
+            metadata, content = files_download(auth, source)
+            open(destination, "w") do io
+                write(io, content)
+            end
+        end
+
+    end
+end
+
+
+
 const mode_strings = Dict{Type, String}(
     FileMetadata => "-",
     FolderMetadata => "d",
@@ -135,30 +253,44 @@ function cmd_ls(args)
     end
 
     auth = get_authorization()
+
+    # TODO: Sort filenames by type. First show all Files, then all
+    # Folders prefixed with their names. Also sort everything
+    # alphabetically.
     for filename in filenames
 
         # Add leading and remove trailing slashes
         if !startswith(filename, "/")
-            filename = "/" * filename
+            filename = "/$filename"
         end
         while endswith(filename, "/")
             filename = filename[1:end-1]
         end
 
         # Distinguish between files and folders
-        metadata = files_get_metadata(auth, filename)
-        if metadata isa Error
-            println("$(quote_string(filename)):",
-                    " $(metadata.dict["error_summary"])")
-            continue
-        elseif metadata isa FolderMetadata
+        if filename == ""
+            # The root folder does not support files_get_metadata
+            isfolder = true
+        else
+            metadata = files_get_metadata(auth, filename)
+            if metadata isa Error
+                println("$(quote_string(filename)):",
+                        " $(metadata.dict["error_summary"])")
+                continue
+            end
+            isfolder = metadata isa FolderMetadata
+        end
+
+        if isfolder
             metadatas = files_list_folder(auth, filename, recursive=recursive)
+            prefix_to_hide = filename
         else
             metadatas = [metadata]
+            prefix_to_hide = ""
         end
 
         # Output directory name if there are multiple directories
-        if metadata isa FolderMetadata && length(filenames) > 1
+        if length(filenames) > 1
             println()
             println("$(quote_string(filename)):")
         end
@@ -172,13 +304,13 @@ function cmd_ls(args)
                 mode = mode_strings[typeof(metadata)]
                 size = metadata_size(metadata)
                 modified = metadata_modified(metadata)
-                path = metadata_path(metadata, filename)
+                path = metadata_path(metadata, prefix_to_hide)
                 println("$mode $(lpad(size, size_digits)) $modified",
                         " $(quote_string(path))")
             end
         else
             for metadata in metadatas
-                path = metadata_path(metadata, filename)
+                path = metadata_path(metadata, prefix_to_hide)
                 println("$(quote_string(path))")
             end
         end
@@ -238,6 +370,7 @@ end
 
 const cmds = Dict(
     "account" => cmd_account,
+    "get" => cmd_get,
     "ls" => cmd_ls,
     "mkdir" => cmd_mkdir,
     "rm" => cmd_rm,
