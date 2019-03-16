@@ -23,9 +23,50 @@ add_arg_table(
                            :nargs => 0),
     ["--recursive", "-R"], Dict(:help => "Recursively list subfolders",
                                 :nargs => 0),
+    "filename", Dict(:help => "file name",
+                     :nargs => '*'),
 )
 
-parse_commandline() = parse_args(arg_settings)
+
+
+const escape_char = Dict{Char, Char}(
+    ' ' => ' ',
+    '"' => '"',
+    '\'' => '\'',
+    '\\' => '\\',
+    '\a' => 'a',
+    '\b' => 'b',
+    '\e' => 'e',
+    '\f' => 'f',
+    '\n' => 'n',
+    '\r' => 'r',
+    '\t' => 't',
+    '\v' => 'v',
+)
+
+function quote_string(str::String)::String
+    buf = IOBuffer()
+    for c in str
+        if isprint(c) && c != ' '
+            print(buf, c)
+        else
+            ec = get(escape_char, c, '#')
+            if ec != '#'
+                print(buf, '\\', escape_char[c])
+            else
+                i = UInt(c)
+                if i <= 0xff
+                    print(buf, "\\x", lpad(string(i), 2, '0'))
+                elseif i <= 0xffff
+                    print(buf, "\\u", lpad(string(i), 4, '0'))
+                else
+                    print(buf, "\\U", lpad(string(i), 8, '0'))
+                end
+            end
+        end
+    end
+    String(take!(buf))
+end
 
 
 
@@ -35,18 +76,72 @@ function cmd_account(args)
     first = account.name.given_name
     last = account.name.surname
     display = account.name.display_name
-    println("    Account: Name: $first $last ($display)")
+    println("Account: Name: $first $last ($display)")
 end
 
 
 
+const mode_strings = Dict{Type, String}(
+    FileMetadata => "-",
+    FolderMetadata => "d",
+    DeletedMetadata => "?",
+)
+
+metadata_size(metadata) = Int64(0)
+metadata_size(metadata::FileMetadata) = metadata.size
+
+# e.g. "2019-03-15T23:05:18Z"))
+metadata_modified(metadata) = "                    " # 20 spaces
+metadata_modified(metadata::FileMetadata) = metadata.server_modified
+
+function metadata_path(metadata, prefix)
+    path = metadata.path_display
+    if startswith(path, prefix)
+        path = path[length(prefix)+1 : end]
+    end
+    if startswith(path, "/")
+        path = path[2:end]
+    end
+end
+
 function cmd_ls(args)
     long = args["long"]
     recursive = args["recursive"]
+    filenames = args["filename"]
+    if isempty(filenames)
+        filenames = [""]        # show root
+    end
+
     auth = get_authorization()
-    entries = files_list_folder(auth, "", recursive=recursive)
-    for entry in entries
-        println("    $(entry.path_display)")
+    for filename in filenames
+        while endswith(filename, "/")
+            filename = filename[1:end-1]
+        end
+        
+        if length(filenames) > 1
+            println()
+            println("$(quote_string(isempty(filename) ? "/" : filename)):")
+        end
+        metadatas = files_list_folder(auth, filename, recursive=recursive)
+        if long
+            max_size = maximum(metadata_size(metadata)
+                               for metadata in metadatas)
+            size_digits = length(string(max_size))
+            for metadata in metadatas
+                mode = mode_strings[typeof(metadata)]
+                size = metadata_size(metadata)
+                modified = metadata_modified(metadata)
+                path = metadata_path(metadata, filename)
+                println("$mode $(lpad(size, size_digits)) $modified ",
+                        "$(quote_string(path))")
+            end
+        else
+            for metadata in metadatas
+                path = metadata_path(metadata, filename)
+                println("$(quote_string(path))")
+            end
+        end
+        
     end
 end
 
@@ -59,13 +154,13 @@ const cmds = Dict(
 
 
 
-function main()
+function main(args)
     println("Julia Dropbox client   ",
             "<https://github.com/eschnett/DropboxSDK.jl>")
-    args = parse_commandline()
-    cmd = args["%COMMAND%"]
+    opts = parse_args(args, arg_settings)
+    cmd = opts["%COMMAND%"]
     fun = cmds[cmd]
-    fun(args[cmd])
+    fun(opts[cmd])
 end
 
-main()
+main(Base.ARGS)
