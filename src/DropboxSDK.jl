@@ -785,6 +785,7 @@ function files_upload(
         return Union{Error, FileMetadata}[]
     end
 
+    @label retry
     entries = []
     for (path, session_id, offset) in zip(paths, session_ids, offsets)
         args = Dict(
@@ -809,22 +810,26 @@ function files_upload(
     )
     res = post_rpc(auth, "files/upload_session/finish_batch", args)
     if res isa Error return res end
-    async_job_id = res["async_job_id"]
+    is_complete = res[".tag"] == "complete"
 
-    is_in_progress = true    
-    delay = 1.0                 # seconds
-    while is_in_progress
-        sleep(delay)
-        delay = min(60.0, 2.0 * delay) # exponential back-off
-        args = Dict(
-            "async_job_id" => async_job_id,
-        )
-        res = post_rpc(auth, "files/upload_session/finish_batch/check", args)
-        if res isa Error return res end
-        is_in_progress = res[".tag"] == "in_progress"
+    if !is_complete
+        async_job_id = res["async_job_id"]
+
+        delay = 1.0             # seconds
+        while !is_complete
+            sleep(delay)
+            delay = min(60.0, 2.0 * delay) # exponential back-off
+
+            args = Dict(
+                "async_job_id" => async_job_id,
+            )
+            res = post_rpc(auth, "files/upload_session/finish_batch/check",
+                           args)
+            if res isa Error return res end
+            is_complete = res[".tag"] == "complete"
+        end
     end
-    @assert res[".tag"] == "complete"
-
+    
     metadatas = Union{Error, FileMetadata}[]
     for (entry, content_hash) in zip(res["entries"], content_hashes)
         if entry[".tag"] == "success" 
@@ -836,6 +841,13 @@ function files_upload(
                 push!(metadatas, metadata)
             end
         else
+            if entry["failure"][".tag"] == "too_many_write_operations"
+                # TODO: retry only those that failed
+                @show "sleeping for 1 second..."
+                sleep(1)
+                @show "retrying..."
+                @goto retry
+            end
             push!(metadatas, Error(entry))
         end
     end
