@@ -843,7 +843,7 @@ function files_upload(
         else
             if entry["failure"][".tag"] == "too_many_write_operations"
                 # TODO: retry only those that failed
-                @show metadatas
+                @show res["entries"]
                 @show "sleeping for 1 second..."
                 sleep(1)
                 @show "retrying..."

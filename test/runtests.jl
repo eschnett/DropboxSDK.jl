@@ -6,7 +6,9 @@ using DropboxSDK
 
 
 
-const folder = "test-$(now(UTC))-$(UUIDs.uuid4())"
+const timestamp = Dates.format(now(UTC), dateformat"yyyy-mm-ddTHH:MM:SS.sss")
+const uuid = UUIDs.uuid4()
+const folder = "test-$timestamp-$uuid"
 println("Using folder \"$folder\" for testing")
 
 filename(entry) =
@@ -139,7 +141,7 @@ const numfiles = 4
     contents = StatefulIterator{Tuple{String, ContentIterator}}(
         ("/$folder/files$i", ContentIterator(Iterators.repeated(chunk, i)))
         for i in 0:numfiles-1)
-    @show metadatas = files_upload(auth, contents)
+    metadatas = files_upload(auth, contents)
     @test length(metadatas) == numfiles
     @test all(metadata isa FileMetadata for metadata in metadatas)
     @test all(metadata.size == (i-1) * length("Hello, World!\n")
