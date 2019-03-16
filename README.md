@@ -1,4 +1,4 @@
-# [DropbboxSDK](https://github.com/eschnett/DropbboxSDK)
+# [DropboxSDK](https://github.com/eschnett/DropboxSDK.jl)
 
 A Julia package to access Dropbox via its
 [API](https://www.dropbox.com/developers/documentation/http).
@@ -14,7 +14,16 @@ A Julia package to access Dropbox via its
 
 ## Setup
 
-(Discuss authorization tokens)
+(Discuss authorization tokens. Upshot: get your token
+[here](https://www.dropbox.com/developers/apps/create), then save it
+into a file `secrets.http` that should look like
+
+```
+access_token:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+A token is like a password; treat it accordingly -- make sure it never
+ends up in a repository, command line, log file, etc.)
 
 
 
@@ -24,6 +33,14 @@ A Julia package to access Dropbox via its
 julia bin/db.jl help
 ```
 
+These CLI commands are implemented:
+
+- `account`: Display account information
+- `get`: Download files
+- `ls`: List files
+- `mkdir`: Create directory
+- `rm`: Delete file or directory
+
 
 
 ## Programming interface
@@ -31,3 +48,23 @@ julia bin/db.jl help
 ```Julia
 using DropboxSDK
 ```
+
+These API functions are currently supported; see their respective
+documentation:
+
+- `files_create_folder`
+- `files_delete`
+- `files_download`
+- `files_get_metadata`
+- `files_list_folder`
+- `files_upload`
+- `users_get_current_account`
+- `users_get_space_usage`
+
+There are also a few local helper functions:
+
+- `calc_content_hash_add!`
+- `calc_content_hash_get`
+- `calc_content_hash_init`
+- `calc_content_hash`
+- `get_authorization`
