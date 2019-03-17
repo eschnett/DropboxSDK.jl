@@ -1,5 +1,6 @@
 name = "DropboxSDK"
-uuid = "4699c5e0-466e-11e9-14e3-97fc6d8e6283"
+uuid = "bfd8ad24-ccb0-5e6a-9bd1-fc4bec713fae"
+
 authors = ["Erik Schnetter <schnetter@gmail.com>"]
 version = "0.1.0"
 
