@@ -36,10 +36,12 @@ julia bin/db.jl help
 These CLI commands are implemented:
 
 - `account`: Display account information
+- `du`: Display space usage
 - `get`: Download files
 - `ls`: List files
 - `mkdir`: Create directory
 - `rm`: Delete file or directory
+- `version`: Show version number
 
 
 

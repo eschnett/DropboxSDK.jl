@@ -181,3 +181,34 @@ end
     @test count(entry -> startswith(entry.path_display, "/$folder"),
                 entries) == 0
 end
+
+
+function runcmd(args::Cmd)::Vector{String}
+    julia = Base.julia_cmd()
+    lines = String[]
+    open(`$julia ../bin/dbftp.jl $args`) do io
+        skipcount = 0
+        for line in eachline(io)
+            if skipcount > 0
+                skipcount -= 1
+                continue
+            elseif startswith(line, "Julia Dropbox client")
+                skipcount = 1
+                continue
+            else
+                push!(lines, line)
+            end
+        end
+    end
+    lines
+end
+
+
+
+@testset "Commands" begin
+    lines = runcmd(`version`)
+    @test length(lines) == 1
+    m = match(r"^Version\s+(.*)", lines[1])
+    @test m !== nothing
+    version = VersionNumber(m.captures[1])
+end
