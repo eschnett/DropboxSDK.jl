@@ -28,7 +28,7 @@ ends up in a repository, command line, log file, etc.)
 ## Command line client
 
 ```sh
-julia bin/db.jl help
+julia bin/dbftp.jl help
 ```
 
 These CLI commands are implemented:
