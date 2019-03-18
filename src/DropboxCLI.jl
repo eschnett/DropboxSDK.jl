@@ -550,6 +550,7 @@ function cmd_put(args)
     end
 
     metadatas = files_upload(auth, make_uploads_iter(uploads))
+    metadatas::Vector{Union{Error, FileMetadata}}
 end
 
 
