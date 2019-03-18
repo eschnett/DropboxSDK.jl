@@ -11,5 +11,5 @@ println("Using folder \"$folder\" for testing")
 
 
 
-#TODO include("testsdk.jl")
+include("testsdk.jl")
 include("testcli.jl")

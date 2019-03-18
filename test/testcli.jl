@@ -10,9 +10,7 @@ function runcmd(args::Cmd)::Vector{String}
             elseif startswith(line, "Julia Dropbox client")
                 skipcount = 1
                 continue
-            elseif (startswith(line, "Warning ") ||
-                    startswith(line, "Waiting ") ||
-                    startswith(line, "Retrying..."))
+            elseif startswith(line, "Info: ")
                 continue
             else
                 push!(lines, line)

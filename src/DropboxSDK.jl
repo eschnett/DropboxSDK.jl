@@ -123,10 +123,10 @@ function post_rpc(auth::Authorization,
         resp2 = Dict(lowercase(key) => value for (key, value) in resp.headers)
         retry_after = mapget(s->parse(Float64, s), resp2, "retry-after")
         if retry_after !== nothing
-            println("Warning $(ex.status): $(res["error_summary"])")
-            println("Waiting $retry_after seconds...")
+            println("Info: Error $(ex.status): $(res["error_summary"])")
+            println("Info: Waiting $retry_after seconds...")
             sleep(retry_after)
-            println("Retrying...")
+            println("Info: Retrying...")
             @goto retry
         end
 
@@ -842,10 +842,13 @@ function files_upload(
                 # TODO: retry only those that failed.
                 # or do they always fail together?
                 # but the docs say to retry only that file.
-                @show res["entries"]
-                @show "sleeping for 1 second..."
+                if !all(e[".tag"] != "success" for e in res["entries"])
+                    @show res["entries"]
+                end
+                println("Info: Error \"$(entry["failure"][".tag"])\"")
+                println("Info: Waiting for 1 seconds...")
                 sleep(1)
-                @show "retrying..."
+                println("Info: Retrying...")
                 @goto retry
             end
             push!(metadatas, Error(entry))
