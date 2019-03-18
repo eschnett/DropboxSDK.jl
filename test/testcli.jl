@@ -10,6 +10,10 @@ function runcmd(args::Cmd)::Vector{String}
             elseif startswith(line, "Julia Dropbox client")
                 skipcount = 1
                 continue
+            elseif (startswith(line, "Warning ") ||
+                    startswith(line, "Waiting ") ||
+                    startswith(line, "Retrying..."))
+                continue
             else
                 push!(lines, line)
             end
@@ -65,6 +69,7 @@ end
         lines = runcmd(`put $filename $folder`)
         @test length(lines) == 0
         lines = runcmd(`put $filename $folder/hello2`)
+        @show lines
         @test length(lines) == 0
     end
 end
