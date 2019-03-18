@@ -23,22 +23,23 @@ end
 
 
 
+include("types.jl")
+
+
+
 ################################################################################
 
-
-
-export Error
-"""
-    struct Error
-        dict::Dict{String, Any}
-    end
-
-Return value if a request failed. The content is a dictionary
-containing the parsed JSON error response.
-"""
-struct Error
-    dict::Dict{String, Any}
-end
+# """
+#     struct Error
+#         dict::Dict{String, Any}
+#     end
+# 
+# Return value if a request failed. The content is a dictionary
+# containing the parsed JSON error response.
+# """
+# struct Error
+#     dict::Dict{String, Any}
+# end
 
 
 
@@ -91,13 +92,13 @@ end
     post_rpc(auth::Authorization,
              fun::String,
              args::Union{Nothing, Dict} = nothing
-            )::Union{Error, Dict}
+            )::Dict
 
 Post an RPC request to the Dropbox API.
 """
 function post_rpc(auth::Authorization,
                   fun::String,
-                  args::Union{Nothing, Dict} = nothing)::Union{Error, Dict}
+                  args::Union{Nothing, Dict} = nothing)::Dict
     headers = ["Authorization" => "Bearer $(auth.access_token)",
                ]
     if args !== nothing
@@ -107,31 +108,36 @@ function post_rpc(auth::Authorization,
         body = HTTP.nobody
     end
 
-    @label retry
-    try
-        resp = HTTP.request(
-            "POST", "https://api.dropboxapi.com/2/$fun", headers, body;
-            verbose=0)
-        res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
-        return res
-    catch ex
-        ex::HTTP.StatusError
-        resp = ex.response
-        res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
+    # We might need to retry several times
+    while true
+        try
+            resp = HTTP.request(
+                "POST", "https://api.dropboxapi.com/2/$fun", headers, body;
+                verbose=0)
+            res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
+            return res
+        catch ex
+            if ex isa HTTP.StatusError
+                resp = ex.response
+                res = JSON.parse(String(resp.body);
+                                 dicttype=Dict, inttype=Int64)
 
-        # Should we retry?
-        resp2 = Dict(lowercase(key) => value for (key, value) in resp.headers)
-        retry_after = mapget(s->parse(Float64, s), resp2, "retry-after")
-        if retry_after !== nothing
-            println("Info: Error $(ex.status): $(res["error_summary"])")
-            println("Info: Waiting $retry_after seconds...")
-            sleep(retry_after)
-            println("Info: Retrying...")
-            @goto retry
+                # Should we retry?
+                resp2 = Dict(lowercase(key) => value
+                             for (key, value) in resp.headers)
+                retry_after = mapget(s->parse(Float64, s), resp2, "retry-after")
+                if retry_after !== nothing
+                    println("Info: Error $(ex.status): $(res["error_summary"])")
+                    println("Info: Waiting $retry_after seconds...")
+                    sleep(retry_after)
+                    println("Info: Retrying...")
+                    continue
+                end
+
+                throw(DropboxError(res))
+            end
+            rethrow(ex)
         end
-
-        # println("Error $(ex.status): $(res["error_summary"])")
-        return Error(res)
     end
 end
 
@@ -141,15 +147,14 @@ end
     post_content_upload(auth::Authorization,
                         fun::String,
                         args::Union{Nothing, Dict} = nothing
-                       )::Union{Error, Dict}
+                       )::Dict
 
 Post a Content Upload request to the Dropbox API.
 """
 function post_content_upload(auth::Authorization,
                              fun::String,
                              args::Union{Nothing, Dict},
-                             content::Vector{UInt8})::
-    Union{Error, Nothing, Dict}
+                             content::Vector{UInt8})::Union{Nothing, Dict}
 
     headers = ["Authorization" => "Bearer $(auth.access_token)",
                ]
@@ -157,31 +162,36 @@ function post_content_upload(auth::Authorization,
     push!(headers, "Content-Type" => "application/octet-stream")
     body = content
 
-    @label retry
-    try
-        resp = HTTP.request(
-            "POST", "https://content.dropboxapi.com/2/$fun", headers, body;
-            verbose=0)
-        res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
-        return res
-    catch ex
-        ex::HTTP.StatusError
-        resp = ex.response
-        res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
+    # We might need to retry several times
+    while true
+        try
+            resp = HTTP.request(
+                "POST", "https://content.dropboxapi.com/2/$fun", headers, body;
+                verbose=0)
+            res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
+            return res
+        catch ex
+            if ex isa HTTP.StatusError
+                resp = ex.response
+                res = JSON.parse(String(resp.body);
+                                 dicttype=Dict, inttype=Int64)
 
-        # Should we retry?
-        resp2 = Dict(lowercase(key) => value for (key, value) in resp.headers)
-        retry_after = mapget(s->parse(Float64, s), resp2, "retry-after")
-        if retry_after !== nothing
-            println("Warning $(ex.status): $(res["error_summary"])")
-            println("Waiting $retry_after seconds...")
-            sleep(retry_after)
-            println("Retrying...")
-            @goto retry
+                # Should we retry?
+                resp2 = Dict(lowercase(key) => value
+                             for (key, value) in resp.headers)
+                retry_after = mapget(s->parse(Float64, s), resp2, "retry-after")
+                if retry_after !== nothing
+                    println("Warning $(ex.status): $(res["error_summary"])")
+                    println("Waiting $retry_after seconds...")
+                    sleep(retry_after)
+                    println("Retrying...")
+                    continue
+                end
+
+                throw(DropboxError(res))
+            end
+            rethrow(ex)
         end
-
-        println("Error $(ex.status): $(res["error_summary"])")
-        return Error(res)
     end
 end
 
@@ -198,40 +208,46 @@ Post a Content Download request to the Dropbox API.
 function post_content_download(auth::Authorization,
                                fun::String,
                                args::Union{Nothing, Dict})::
-    Union{Error, Tuple{Dict, Vector{UInt8}}}
+    Tuple{Dict, Vector{UInt8}}
 
     headers = ["Authorization" => "Bearer $(auth.access_token)",
                ]
     push!(headers, "Dropbox-API-Arg" => JSON.json(args))
     push!(headers, "Content-Type" => "application/octet-stream")
 
-    @label retry
-    try
-        resp = HTTP.request(
-            "POST", "https://content.dropboxapi.com/2/$fun", headers;
-            verbose=0)
-        resp2 = Dict(lowercase(key) => value for (key, value) in resp.headers)
-        res = JSON.parse(String(resp2["dropbox-api-result"]);
-                         dicttype=Dict, inttype=Int64)
-        return res, resp.body
-    catch ex
-        ex::HTTP.StatusError
-        resp = ex.response
-        res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
+    # We might need to retry several times
+    while true
+        try
+            resp = HTTP.request(
+                "POST", "https://content.dropboxapi.com/2/$fun", headers;
+                verbose=0)
+            resp2 = Dict(lowercase(key) => value
+                         for (key, value) in resp.headers)
+            res = JSON.parse(String(resp2["dropbox-api-result"]);
+                             dicttype=Dict, inttype=Int64)
+            return res, resp.body
+        catch ex
+            if ex isa HTTP.StatusError
+                resp = ex.response
+                res = JSON.parse(String(resp.body);
+                                 dicttype=Dict, inttype=Int64)
 
-        # Should we retry?
-        resp2 = Dict(lowercase(key) => value for (key, value) in resp.headers)
-        retry_after = mapget(s->parse(Float64, s), resp2, "retry-after")
-        if retry_after !== nothing
-            println("Warning $(ex.status): $(res["error_summary"])")
-            println("Waiting $retry_after seconds...")
-            sleep(retry_after)
-            println("Retrying...")
-            @goto retry
+                # Should we retry?
+                resp2 = Dict(lowercase(key) => value
+                             for (key, value) in resp.headers)
+                retry_after = mapget(s->parse(Float64, s), resp2, "retry-after")
+                if retry_after !== nothing
+                    println("Warning $(ex.status): $(res["error_summary"])")
+                    println("Waiting $retry_after seconds...")
+                    sleep(retry_after)
+                    println("Retrying...")
+                    continue
+                end
+
+                throw(DropboxError(res))
+            end
+            rethrow(ex)
         end
-
-        println("Error $(ex.status): $(res["error_summary"])")
-        return Error(res)
     end
 end
 
@@ -325,14 +341,13 @@ export files_create_folder
 Create a folder `path`.
 """
 function files_create_folder(auth::Authorization,
-                             path::String)::Union{Error, Nothing}
+                             path::String)::FolderMetadata
     args = Dict(
         "path" => path,
         "autorename" => false,
     )
     res = post_rpc(auth, "files/create_folder", args)
-    if res isa Error return res end
-    return nothing
+    return FolderMetadata(res)
 end
 
 
@@ -346,14 +361,13 @@ export files_delete
 Delete a file or folder `path` recursively.
 """
 function files_delete(auth::Authorization,
-                      path::String)::Union{Error, Nothing}
+                      path::String)::Metadata
     args = Dict(
         "path" => path,
         # parent_rev
     )
     res = post_rpc(auth, "files/delete", args)
-    if res isa Error return res end
-    return nothing
+    return Metadata(res)
 end
 
 
@@ -367,21 +381,24 @@ export files_download
 Download file `path`, return both its metadata and content.
 """
 function files_download(auth::Authorization,
-                        path::String)::
-    Union{Error, Tuple{FileMetadata, Vector{UInt8}}}
+                        path::String)::Tuple{FileMetadata, Vector{UInt8}}
 
     args = Dict(
         "path" => path,
     )
-    res = post_content_download(auth, "files/download", args)
-    if res isa Error return res end
-    res, content = res
+    res, content = post_content_download(auth, "files/download", args)
     metadata = FileMetadata(res)
 
     # Check content hash
     content_hash = calc_content_hash(content)
     if metadata.content_hash != content_hash
-        return Error(Dict("error_summary" => "content hash does not match"))
+        throw(DropboxError(
+            Dict("error" => "LocalContentHashMismatch",
+                 "error_summary" => "local/content_hashes_do_not_match",
+                 "path" => path,
+                 "content_hash" => metadata.content_hash,
+                 "local_content_hash" => content_hash,
+                 )))
     end
 
     return metadata, content
@@ -398,7 +415,7 @@ export files_get_metadata
 Get metadata for file or folder `path`.
 """
 function files_get_metadata(auth::Authorization,
-                            path::String)::Union{Error, Metadata}
+                            path::String)::Metadata
     args = Dict(
         "path" => path,
         "include_media_info" => false,
@@ -407,92 +424,10 @@ function files_get_metadata(auth::Authorization,
         # "include_property_groups"
     )
     res = post_rpc(auth, "files/get_metadata", args)
-    if res isa Error return res end
     return Metadata(res)
 end
 
 
-
-export Metadata
-abstract type Metadata end
-Metadata(d::Dict) = Dict(
-    "file" => FileMetadata,
-    "folder" => FolderMetadata,
-    "deleted" => DeletedMetadata,
-)[d[".tag"]](d)
-
-export MediaInfo, SymlinkInfo, FileSharingInfo, PropertyGroup
-struct MediaInfo end            # TODO
-struct SymlinkInfo end          # TODO
-struct FileSharingInfo end      # TODO
-struct PropertyGroup end        # TODO
-
-export FileMetadata
-struct FileMetadata <: Metadata
-    name::String
-    id::String
-    client_modified::String
-    server_modified::String
-    rev::String
-    size::Int64
-    path_lower::Union{Nothing, String}
-    path_display::Union{Nothing, String}
-    media_info::Union{Nothing, MediaInfo}
-    symlink_info::Union{Nothing, SymlinkInfo}
-    sharing_info::Union{Nothing, FileSharingInfo}
-    property_groups::Union{Nothing, Vector{PropertyGroup}}
-    has_explicit_shared_members::Union{Nothing, Bool}
-    content_hash::Union{Nothing, String}
-end
-FileMetadata(d::Dict) = FileMetadata(
-    d["name"],
-    d["id"],
-    d["client_modified"],
-    d["server_modified"],
-    d["rev"],
-    d["size"],
-    get(d, "path_lower", nothing),
-    get(d, "path_display", nothing),
-    nothing,                    # TODO
-    nothing,                    # TODO
-    nothing,                    # TODO
-    nothing,                    # TODO
-    get(d, "has_explicit_shared_members", nothing),
-    get(d, "content_hash", nothing)
-)
-
-export FolderSharingInfo
-struct FolderSharingInfo end    # TODO
-
-export FolderMetadata
-struct FolderMetadata <: Metadata
-    name::String
-    id::String
-    path_lower::Union{Nothing, String}
-    path_display::Union{Nothing, String}
-    sharing_info::Union{Nothing, FolderSharingInfo}
-    property_groups::Union{Nothing, Vector{PropertyGroup}}
-end
-FolderMetadata(d::Dict) = FolderMetadata(
-    d["name"],
-    d["id"],
-    get(d, "path_lower", nothing),
-    get(d, "path_display", nothing),
-    nothing,                    # TODO
-    nothing                     # TODO
-)
-
-export DeletedMetadata
-struct DeletedMetadata <: Metadata
-    name::String
-    path_lower::Union{Nothing, String}
-    path_display::Union{Nothing, String}
-end
-DeletedMetadata(d::Dict) = DeletedMetadata(
-    d["name"],
-    get(d, "path_lower", nothing),
-    get(d, "path_display", nothing)
-)
 
 export files_list_folder
 """
@@ -505,9 +440,7 @@ List the contents of folder `path`.
 """
 function files_list_folder(auth::Authorization,
                            path::String;
-                           recursive::Bool = false)::
-    Union{Error, Vector{Metadata}}
-
+                           recursive::Bool = false)::Vector{Metadata}
     args = Dict(
         "path" => path,
         "recursive" => recursive,
@@ -517,7 +450,6 @@ function files_list_folder(auth::Authorization,
         "include_mounted_folders" => true,
     )
     res = post_rpc(auth, "files/list_folder", args)
-    if res isa Error return res end
     metadatas = Metadata[Metadata(x) for x in res["entries"]]
     cursor = res["cursor"]
     has_more = res["has_more"]
@@ -527,7 +459,6 @@ function files_list_folder(auth::Authorization,
             "cursor" => cursor,
         )
         res = post_rpc(auth, "files/list_folder/continue", args)
-        if res isa Error return res end
         append!(metadatas, Metadata[Metadata(x) for x in res["entries"]])
         cursor = res["cursor"]
         has_more = res["has_more"]
@@ -556,9 +487,7 @@ files to be uploaded.
 """
 function files_upload(auth::Authorization,
                       path::String,
-                      content::Vector{UInt8})::
-    Union{Error, FileMetadata}
-
+                      content::Vector{UInt8})::FileMetadata
     args = Dict(
         "path" => path,
         "mode" => add,
@@ -569,13 +498,18 @@ function files_upload(auth::Authorization,
         "strict_conflict" => false,
     )
     res = post_content_upload(auth, "files/upload", args, content)
-    if res isa Error return res end
     metadata = FileMetadata(res)
 
     # Check content hash
     content_hash = calc_content_hash(content)
     if metadata.content_hash != content_hash
-        return Error(Dict("error_summary" => "content hash does not match"))
+        throw(DropboxError(
+            Dict("error" => "LocalContentHashMismatch",
+                 "error_summary" => "local/content_hashes_do_not_match",
+                 "path" => path,
+                 "content_hash" => metadata.content_hash,
+                 "local_content_hash" => content_hash,
+                 )))
     end
 
     return metadata
@@ -621,7 +555,7 @@ files to be uploaded.
 """
 function files_upload(auth::Authorization,
                       path::String,
-                      content::ContentIterator)::Union{Error, FileMetadata}
+                      content::ContentIterator)::FileMetadata
     session_id = nothing
     offset = Int64(0)
     cstate = calc_content_hash_init()
@@ -634,7 +568,6 @@ function files_upload(auth::Authorization,
             )
             res = post_content_upload(auth, "files/upload_session/start",
                                       args, chunk)
-            if res isa Error return res end
             session_id = res["session_id"]
         else
             args = Dict(
@@ -646,7 +579,6 @@ function files_upload(auth::Authorization,
             )
             res = post_content_upload(auth, "files/upload_session/append_v2",
                                       args, chunk)
-            if res isa Error return res end
         end
         offset = offset + length(chunk)
         calc_content_hash_add!(cstate, chunk)
@@ -656,7 +588,7 @@ function files_upload(auth::Authorization,
         @assert offset == 0
         metadata = files_upload(auth, path, UInt8[])
     else
-        # Note: We don't need to close the session, so we skip this step
+        # Note: We don't need to close the session
         args = Dict(
             "cursor" => Dict(
                 "session_id" => session_id,
@@ -674,14 +606,19 @@ function files_upload(auth::Authorization,
         )
         res = post_content_upload(auth, "files/upload_session/finish",
                                   args, UInt8[])
-        if res isa Error return res end
         metadata = FileMetadata(res)
     end
 
     # Check content hash
     content_hash = calc_content_hash_get(cstate)
     if metadata.content_hash != content_hash
-        return Error(Dict("error_summary" => "content hash does not match"))
+        throw(DropboxError(
+            Dict("error" => "LocalContentHashMismatch",
+                 "error_summary" => "local/content_hashes_do_not_match",
+                 "path" => path,
+                 "content_hash" => metadata.content_hash,
+                 "local_content_hash" => content_hash,
+                 )))
     end
 
     return metadata
@@ -706,7 +643,7 @@ This function is efficient if many or larger files are uploaded.
 function files_upload(
     auth::Authorization,
     contents::StatefulIterator{Tuple{String, ContentIterator}})::
-    Union{Error, Vector{Union{Error, FileMetadata}}}
+    Vector{FileMetadata}
     
     # TODO: Define Cursor (and Commit) structs instead
     paths = String[]
@@ -729,7 +666,6 @@ function files_upload(
                 )
                 res = post_content_upload(auth, "files/upload_session/start",
                                           args, chunk)
-                if res isa Error return res end
                 session_id = res["session_id"]
             else
                 args = Dict(
@@ -742,12 +678,14 @@ function files_upload(
                 res = post_content_upload(auth,
                                           "files/upload_session/append_v2",
                                           args, chunk)
-                if res isa Error return res end
             end
             offset = offset + length(chunk)
             calc_content_hash_add!(cstate, chunk)
         end
-        # TODO: We need to close only the last session
+        # TODO: We need to close only the last session. But what does
+        # "last" mean? Is it "last session id passed to
+        # files/finish_upload_batch", or the last session to finish
+        # uploading?
         if session_id === nothing
             # The file is empty
             @assert offset == 0
@@ -756,7 +694,6 @@ function files_upload(
             )
             res = post_content_upload(auth, "files/upload_session/start",
                                       args, UInt8[])
-            if res isa Error return res end
             session_id = res["session_id"]
         else
             args = Dict(
@@ -768,7 +705,6 @@ function files_upload(
             )
             res = post_content_upload(auth, "files/upload_session/append_v2",
                                       args, UInt8[])
-            if res isa Error return res end
         end
 
         push!(paths, path)
@@ -779,82 +715,94 @@ function files_upload(
 
     if isempty(paths)
         # We uploaded zero files
-        return Union{Error, FileMetadata}[]
+        return FileMetadata[]
     end
 
-    @label retry
-    entries = []
-    for (path, session_id, offset) in zip(paths, session_ids, offsets)
-        args = Dict(
-            "cursor" => Dict(
-                "session_id" => session_id,
-                "offset" => offset,
-            ),
-            "commit" => Dict(
-                "path" => path,
-                "mode" => add,
-                "autorename" => false,
-                # "client_modified"
-                "mute" => false,
-                # "property_groups"
-                "strict_conflict" => false,
-            ),
-        )
-        push!(entries, args)
-    end
-    args = Dict(
-        "entries" => entries,
-    )
-    res = post_rpc(auth, "files/upload_session/finish_batch", args)
-    if res isa Error return res end
-    is_complete = res[".tag"] == "complete"
+    # We might need to retry several times
+    while true
 
-    if !is_complete
-        async_job_id = res["async_job_id"]
-
-        delay = 1.0             # seconds
-        while !is_complete
-            sleep(delay)
-            delay = min(60.0, 2.0 * delay) # exponential back-off
-
+        entries = []
+        for (path, session_id, offset) in zip(paths, session_ids, offsets)
             args = Dict(
-                "async_job_id" => async_job_id,
+                "cursor" => Dict(
+                    "session_id" => session_id,
+                    "offset" => offset,
+                ),
+                "commit" => Dict(
+                    "path" => path,
+                    "mode" => add,
+                    "autorename" => false,
+                    # "client_modified"
+                    "mute" => false,
+                    # "property_groups"
+                    "strict_conflict" => false,
+                ),
             )
-            res = post_rpc(auth, "files/upload_session/finish_batch/check",
-                           args)
-            if res isa Error return res end
-            is_complete = res[".tag"] == "complete"
+            push!(entries, args)
         end
-    end
+        args = Dict(
+            "entries" => entries,
+        )
+        res = post_rpc(auth, "files/upload_session/finish_batch", args)
+        is_complete = res[".tag"] == "complete"
+
+        # Wait for completion
+        if !is_complete
+            async_job_id = res["async_job_id"]
+
+            delay = 1.0         # seconds
+            while !is_complete
+                sleep(delay)
+                delay = min(60.0, 2.0 * delay) # exponential back-off
+
+                args = Dict(
+                    "async_job_id" => async_job_id,
+                )
+                res = post_rpc(auth, "files/upload_session/finish_batch/check",
+                               args)
+                is_complete = res[".tag"] == "complete"
+            end
+        end
     
-    metadatas = Union{Error, FileMetadata}[]
-    for (entry, content_hash) in zip(res["entries"], content_hashes)
-        if entry[".tag"] == "success" 
-            metadata = FileMetadata(entry)
-            if metadata.content_hash != content_hash
-                push!(metadatas, Error(Dict("error_summary" =>
-                                            "content hash does not match")))
-            else
-                push!(metadatas, metadata)
-            end
-        else
-            if entry["failure"][".tag"] == "too_many_write_operations"
-                # TODO: retry only those that failed.
-                # or do they always fail together?
-                # but the docs say to retry only that file.
-                if !all(e[".tag"] != "success" for e in res["entries"])
-                    @show res["entries"]
+        metadatas = FileMetadata[]
+        for (entry, content_hash) in zip(res["entries"], content_hashes)
+            if entry[".tag"] == "success" 
+                # The tag is "success", but the type is actually
+                # "FileMetadata". This is strangd, and also doesn't
+                # agree with the documentation.
+                success = entry
+                metadata = FileMetadata(success)
+                if metadata.content_hash != content_hash
+                    throw(DropboxError(
+                        # TODO: use the path that the caller specified
+                        Dict("error" => "LocalContentHashMismatch",
+                             "error_summary" =>
+                             "local/content_hashes_do_not_match",
+                             "path" => metadata.path_display,
+                             "content_hash" => metadata.content_hash,
+                             "local_content_hash" => content_hash,
+                             )))
                 end
-                println("Info: Error \"$(entry["failure"][".tag"])\"")
-                println("Info: Waiting for 1 seconds...")
-                sleep(1)
-                println("Info: Retrying...")
-                @goto retry
+                push!(metadatas, metadata)
+            else
+                @assert entry[".tag"] == "failure"
+                failure = entry["failure"]
+                if failure[".tag"] == "too_many_write_operations"
+                    # TODO: retry only those that failed.
+                    println("Info: Error \"$(failure[".tag"])\"")
+                    println("Info: Waiting for 1 seconds...")
+                    sleep(1)
+                    println("Info: Retrying...")
+                    continue
+                end
+                # TODO: Distinguish between those files that succeeded
+                # and those that failed
+                throw(DropboxError(failure))
             end
-            push!(metadatas, Error(entry))
         end
+        return metadatas
+
     end
-    return metadatas
 end
 
 
@@ -1007,11 +955,8 @@ export users_get_current_account
 Get information about the current account, i.e. the account associated
 with the account token in the authorization `auth`.
 """
-function users_get_current_account(auth::Authorization)::
-    Union{Error, FullAccount}
-
+function users_get_current_account(auth::Authorization)::FullAccount
     res = post_rpc(auth, "users/get_current_account")
-    if res isa Error return res end
     return FullAccount(res)
 end
 
@@ -1070,9 +1015,8 @@ export users_get_space_usage
 
 Get the space usage for the current account.
 """
-function users_get_space_usage(auth::Authorization)::Union{Error, SpaceUsage}
+function users_get_space_usage(auth::Authorization)::SpaceUsage
     res = post_rpc(auth, "users/get_space_usage")
-    if res isa Error return res end
     return SpaceUsage(res)
 end
 

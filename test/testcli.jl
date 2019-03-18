@@ -1,7 +1,8 @@
 function runcmd(args::Cmd)::Vector{String}
     julia = Base.julia_cmd()
+    dbftp = joinpath("..", "bin", "dbftp.jl")
     lines = String[]
-    open(`$julia ../bin/dbftp.jl $args`) do io
+    open(`$julia $dbftp $args`) do io
         skipcount = 0
         for line in eachline(io)
             if skipcount > 0
@@ -65,10 +66,8 @@ end
         content = Vector{UInt8}("Hello, World!\n")
         write(filename, content)
         lines = runcmd(`put $filename $folder`)
-        @show lines
         @test length(lines) == 0
         lines = runcmd(`put $filename $folder/hello2`)
-        @show lines
         @test length(lines) == 0
     end
 end
@@ -77,7 +76,6 @@ end
 
 @testset "Command ls" begin
     lines = runcmd(`ls $folder`)
-    @show lines
     @test length(lines) == 2
     @test lines[1] == "hello"
     @test lines[2] == "hello2"
@@ -88,16 +86,12 @@ end
 @testset "Command get" begin
     mktempdir() do dir
         lines = runcmd(`get $folder/hello $dir`)
-        @show lines
         @test length(lines) == 0
         content = read(joinpath(dir, "hello"))
-        @show content
         @test String(content) == "Hello, World!\n"
         lines = runcmd(`get $folder/hello2 $(joinpath(dir, "hello2"))`)
-        @show lines
         @test length(lines) == 0
         content = read(joinpath(dir, "hello2"))
-        @show content
         @test String(content) == "Hello, World!\n"
     end
 end

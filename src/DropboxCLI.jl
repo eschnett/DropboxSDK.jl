@@ -122,6 +122,7 @@ function cmd_account(args)
     last = account.name.surname
     display = account.name.display_name
     println("Account: Name: $first $last ($display)")
+    return 0
 end
 
 
@@ -139,7 +140,7 @@ end
 
 function cmd_du(args)
     auth = get_authorization()
-    usage::SpaceUsage = users_get_space_usage(auth)
+    usage = users_get_space_usage(auth)
     used = usage.used
     allocated = usage.allocation.allocated
 
@@ -156,6 +157,8 @@ function cmd_du(args)
     println("used:     ",
             " $(lpad(used, bytes_digits)) bytes",
             " ($(round(used / scale, sigdigits=3)) $(prefix)Byte, $pct%)")
+
+    return 0
 end
 
 
@@ -164,15 +167,17 @@ function cmd_get(args)
     filenames = args["filename"]
     if length(filenames) == 0
         println("Error: No file names given")
-        exit(1)
+        return 1
     elseif length(filenames) == 1
         println("Error: Destination missing")
-        exit(1)
+        return 1
     end
     # The last file name is the destination
     @assert !haskey(args, "target")
     destination = filenames[end]
     sources = filenames[1:end-1]
+
+    exit_code = 0
 
     auth = get_authorization()
 
@@ -189,11 +194,17 @@ function cmd_get(args)
             # The root directory does not support files_get_metadata
             isdir_source = true
         else
-            metadata = files_get_metadata(auth, source)
-            if metadata isa Error
-                println("$(quote_string(source)):",
-                        " $(metadata.dict["error_summary"])")
-                continue
+            metadata = try
+                files_get_metadata(auth, source)
+            catch ex
+                if ex isa DropboxError
+                    println("$(quote_string(source)):",
+                            " $(ex.dict["error_summary"])")
+                    exit_code = 1
+                    continue
+                else
+                    rethrow(ex)
+                end
             end
             isdir_source = metadata isa FolderMetadata
         end
@@ -267,6 +278,8 @@ function cmd_get(args)
         end
 
     end
+
+    return exit_code
 end
 
 
@@ -306,6 +319,8 @@ function cmd_ls(args)
         filenames = [""]        # show root
     end
 
+    exit_code = 0
+
     auth = get_authorization()
 
     # TODO: Sort filenames by type. First show all Files, then all
@@ -326,11 +341,17 @@ function cmd_ls(args)
             # The root directory does not support files_get_metadata
             isdirectory = true
         else
-            metadata = files_get_metadata(auth, filename)
-            if metadata isa Error
-                println("$(quote_string(filename)):",
-                        " $(metadata.dict["error_summary"])")
-                continue
+            metadata = try
+                files_get_metadata(auth, filename)
+            catch ex
+                if ex isa DropboxError
+                    println("$(quote_string(filename)):",
+                            " $(ex.dict["error_summary"])")
+                    exit_code = 1
+                    continue
+                else
+                    rethrow(ex)
+                end
             end
             isdirectory = metadata isa FolderMetadata
         end
@@ -371,12 +392,16 @@ function cmd_ls(args)
         end
         
     end
+
+    return exit_code
 end
 
 
 
 function cmd_mkdir(args)
     directorynames = args["directoryname"]
+
+    exit_code = 0
 
     auth = get_authorization()
     for directoryname in directorynames
@@ -389,13 +414,22 @@ function cmd_mkdir(args)
             directoryname = directoryname[1:end-1]
         end
 
-        res = files_create_folder(auth, directoryname)
-        if res isa Error
-            println("$(quote_string(directoryname)):",
-                    " $(res.dict["error_summary"])")
+        try
+            files_create_folder(auth, directoryname)
+        catch ex
+            if ex isa DropboxError
+                println("$(quote_string(directoryname)):",
+                        " $(ex.dict["error_summary"])")
+                exit_code = 1
+                continue
+            else
+                rethrow(ex)
+            end
         end
 
     end
+
+    return exit_code
 end
 
 
@@ -404,15 +438,17 @@ function cmd_put(args)
     filenames = args["filename"]
     if length(filenames) == 0
         println("Error: No file names given")
-        exit(1)
+        return 1
     elseif length(filenames) == 1
         println("Error: Destination missing")
-        exit(1)
+        return 1
     end
     # The last file name is the destination
     @assert !haskey(args, "target")
     destination = filenames[end]
     sources = filenames[1:end-1]
+
+    exit_code = 0
 
     auth = get_authorization()
 
@@ -429,26 +465,31 @@ function cmd_put(args)
         ispath_destination = true
         isdir_destination = true
     else
-        metadata = files_get_metadata(auth, destination)
-        if metadata isa Error
-            if metadata.dict["error"][".tag"] == "path" &&
-                metadata.dict["error"]["path"][".tag"] == "not_found"
-                ispath_destination = false
-                isdir_destination = false
+        try
+            metadata = files_get_metadata(auth, destination)
+            ispath_destination = true
+            isdir_destination = metadata isa FolderMetadata
+        catch ex
+            if ex isa DropboxError
+                if ex.dict["error"][".tag"] == "path" &&
+                    ex.dict["error"]["path"][".tag"] == "not_found"
+                    ispath_destination = false
+                    isdir_destination = false
+                else
+                    println("$(quote_string(filename)):",
+                            " $(ex.dict["error_summary"])")
+                    return 1
+                end
             else
-                println("$(quote_string(destination)):",
-                        " $(metadata.dict["error_summary"])")
-                exit(1)
+                rethrow(ex)
             end
         end
-        ispath_destination = true
-        isdir_destination = metadata isa FolderMetadata
     end
 
     if !isdir_destination && length(sources) != 1
         # Multiple sources: Destination is not a directory
         println("Destination directory \"$destination\" does not exist")
-        exit(1)
+        return 1
     end
 
     uploads = Tuple{String, String}[]
@@ -478,7 +519,6 @@ function cmd_put(args)
                 # that name will be created.
                 filename = destination
                 pathname = dirname(filename)
-                @assert isdir(pathname)
             end
         else
             # Multiple sources: Destination is not a directory
@@ -499,7 +539,15 @@ function cmd_put(args)
         # Compare content hash before uploading
         need_upload = true
         content = nothing
-        metadata = files_get_metadata(auth, filename)
+        metadata = try
+            files_get_metadata(auth, filename)
+        catch ex
+            if ex isa DropboxError
+                nothing
+            else
+                rethrow(ex)
+            end
+        end
         if metadata isa FileMetadata
             size = filesize(source)
             if metadata.size == size
@@ -549,14 +597,17 @@ function cmd_put(args)
             make_upload_iter(upload) for upload in uploads)
     end
 
-    metadatas = files_upload(auth, make_uploads_iter(uploads))
-    metadatas::Vector{Union{Error, FileMetadata}}
+    files_upload(auth, make_uploads_iter(uploads))
+
+    return exit_code
 end
 
 
 
 function cmd_rm(args)
     filenames = args["filename"]
+
+    exit_code = 0
 
     auth = get_authorization()
     for filename in filenames
@@ -569,12 +620,22 @@ function cmd_rm(args)
             filename = filename[1:end-1]
         end
 
-        res = files_delete(auth, filename)
-        if res isa Error
-            println("$(quote_string(filename)): $(res.dict["error_summary"])")
+        try
+            files_delete(auth, filename)
+        catch ex
+            if ex isa DropboxError
+                println("$(quote_string(filename)):",
+                        " $(ex.dict["error_summary"])")
+                exit_code = 1
+                continue
+            else
+                rethrow(ex)
+            end
         end
 
     end
+
+    return exit_code
 end
 
 
@@ -599,6 +660,8 @@ function cmd_version(args)
     @assert name == "DropboxSDK"
 
     println("Version $version")
+
+    return 0
 end
 
 
@@ -623,7 +686,8 @@ function main(args)
     opts = parse_args(args, arg_settings)
     cmd = opts["%COMMAND%"]
     fun = cmds[cmd]
-    fun(opts[cmd])
+    code = fun(opts[cmd])
+    return code
 end
 
 end
