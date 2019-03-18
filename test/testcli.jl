@@ -67,6 +67,7 @@ end
         content = Vector{UInt8}("Hello, World!\n")
         write(filename, content)
         lines = runcmd(`put $filename $folder`)
+        @show lines
         @test length(lines) == 0
         lines = runcmd(`put $filename $folder/hello2`)
         @show lines
@@ -78,6 +79,7 @@ end
 
 @testset "Command ls" begin
     lines = runcmd(`ls $folder`)
+    @show lines
     @test length(lines) == 2
     @test lines[1] == "hello"
     @test lines[2] == "hello2"

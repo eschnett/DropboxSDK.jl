@@ -165,7 +165,6 @@ function post_content_upload(auth::Authorization,
         res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
         return res
     catch ex
-        @show ex
         ex::HTTP.StatusError
         resp = ex.response
         res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
@@ -216,7 +215,6 @@ function post_content_download(auth::Authorization,
                          dicttype=Dict, inttype=Int64)
         return res, resp.body
     catch ex
-        @show ex
         ex::HTTP.StatusError
         resp = ex.response
         res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
