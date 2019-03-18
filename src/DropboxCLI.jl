@@ -227,15 +227,15 @@ function cmd_get(args)
         # Compare content hash before downloading
         need_download = true
         if metadata.size == 0
-            open(destination, "w") do io
+            open(filename, "w") do io
                 truncate(io, 0)
             end
             need_download = false
-        elseif isfile(destination)
-            size = filesize(destination)
+        elseif isfile(filename)
+            size = filesize(filename)
             if size == metadata.size
                 # Don't download if content hash matches
-                content = read(destination)
+                content = read(filename)
                 content_hash = calc_content_hash(content)
                 if content_hash == metadata.content_hash
                     @show "content hash matches; skipping download"
@@ -245,11 +245,11 @@ function cmd_get(args)
                 # TODO: Download only missing fraction
             else
                 # Truncate if necessary
-                content = read(destination, metadata.size)
+                content = read(filename, metadata.size)
                 content_hash = calc_content_hash(content)
                 if content_hash == metadata.content_hash
                     @show "content hash matches; truncating local file and skipping download"
-                    open(destination, "w") do io
+                    open(filename, "w") do io
                         truncate(io, metadata.size)
                     end
                     need_download = false
@@ -261,7 +261,7 @@ function cmd_get(args)
         if need_download
             # TODO: download all files simultaneously
             metadata, content = files_download(auth, source)
-            open(destination, "w") do io
+            open(filename, "w") do io
                 write(io, content)
             end
         end
@@ -445,6 +445,14 @@ function cmd_put(args)
         isdir_destination = metadata isa FolderMetadata
     end
 
+    if !isdir_destination && length(sources) != 1
+        # Multiple sources: Destination is not a directory
+        println("Destination directory \"$destination\" does not exist")
+        exit(1)
+    end
+
+    uploads = Tuple{String, String}[]
+
     for source in sources
 
         # Distinguish between files and directories
@@ -509,14 +517,39 @@ function cmd_put(args)
 
         # TODO: touch Dropbox file if upload is skipped?
         if need_upload
-            if content === nothing
-                content = read(source)
-            end
-            # TODO: upload all files simultaneously
-            metadata = files_upload(auth, filename, content)
+            # if content === nothing
+            #     content = read(source)
+            # end
+            # metadata = files_upload(auth, filename, content)
+
+            # Upload all files simultaneously
+            # TODO: don't read files twice; instead, check content
+            # hash dynamically when the file is about to be uploaded.
+            # probably most elegant to use Julia's multi-tasking (not
+            # multi-threading) for this, i.e. to use a Channel instead
+            # of iterators.
+            push!(uploads, (filename, source))
         end
 
     end
+
+    # Create upload iterator for a single file
+    function make_upload_iter(upload::Tuple{String, String})::
+        Tuple{String, ContentIterator}
+
+        dst, src = upload
+        dst, ContentIterator([read(src)])
+    end
+
+    # Create upload iterator for several files
+    function make_uploads_iter(uploads::Vector{Tuple{String, String}})::
+        StatefulIterator{Tuple{String, ContentIterator}}
+
+        StatefulIterator{Tuple{String, ContentIterator}}(
+            make_upload_iter(upload) for upload in uploads)
+    end
+
+    metadatas = files_upload(auth, make_uploads_iter(uploads))
 end
 
 
