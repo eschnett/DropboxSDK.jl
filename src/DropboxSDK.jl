@@ -626,6 +626,14 @@ end
 
 
 
+mutable struct UploadState
+    path::String
+    session_id::String
+    offset::Int64
+    content_hash::String
+    metadata::Union{Nothing, FileMetadata}
+end
+
 """
     files_upload(auth::Authorization,
                  contents::StatefulIterator{Tuple{String, ContentIterator}}
@@ -645,11 +653,7 @@ function files_upload(
     contents::StatefulIterator{Tuple{String, ContentIterator}})::
     Vector{FileMetadata}
     
-    # TODO: Define Cursor (and Commit) structs instead
-    paths = String[]
-    session_ids = String[]
-    offsets = Int64[]
-    content_hashes = String[]
+    upload_states = UploadState[]
     # TODO: can handle only 1000 files at once
     # TODO: parallelize loop
     for (path, content) in contents.iterator
@@ -707,13 +711,12 @@ function files_upload(
                                       args, UInt8[])
         end
 
-        push!(paths, path)
-        push!(session_ids, session_id)
-        push!(offsets, offset)
-        push!(content_hashes, calc_content_hash_get(cstate))
+        content_hash = calc_content_hash_get(cstate)
+        push!(upload_states,
+              UploadState(path, session_id, offset, content_hash, nothing))
     end
 
-    if isempty(paths)
+    if isempty(upload_states)
         # We uploaded zero files
         return FileMetadata[]
     end
@@ -721,15 +724,25 @@ function files_upload(
     # We might need to retry several times
     while true
 
+        missing_uploads = Int[]
+        for (i, upload_state) in enumerate(upload_states)
+            if upload_state.metadata isa Nothing
+                push!(missing_uploads, i)
+            end
+        end
+        @assert !isempty(missing_uploads)
+
         entries = []
-        for (path, session_id, offset) in zip(paths, session_ids, offsets)
+        for i in missing_uploads
+            upload_state = upload_states[i]
+            @assert upload_state.metadata isa Nothing
             args = Dict(
                 "cursor" => Dict(
-                    "session_id" => session_id,
-                    "offset" => offset,
+                    "session_id" => upload_state.session_id,
+                    "offset" => upload_state.offset,
                 ),
                 "commit" => Dict(
-                    "path" => path,
+                    "path" => upload_state.path,
                     "mode" => add,
                     "autorename" => false,
                     # "client_modified"
@@ -763,43 +776,51 @@ function files_upload(
                 is_complete = res[".tag"] == "complete"
             end
         end
-    
-        metadatas = FileMetadata[]
-        for (entry, content_hash) in zip(res["entries"], content_hashes)
+        entries = res["entries"]
+
+        @assert length(entries) == length(missing_uploads)
+        for (i, entry) in zip(missing_uploads, entries)
             if entry[".tag"] == "success" 
                 # The tag is "success", but the type is actually
-                # "FileMetadata". This is strangd, and also doesn't
+                # "FileMetadata". This is strange, and also doesn't
                 # agree with the documentation.
                 success = entry
+                upload_state = upload_states[i]
+                @assert upload_state.metadata isa Nothing
+
                 metadata = FileMetadata(success)
-                if metadata.content_hash != content_hash
+                if metadata.content_hash != upload_state.content_hash
                     throw(DropboxError(
-                        # TODO: use the path that the caller specified
                         Dict("error" => "LocalContentHashMismatch",
                              "error_summary" =>
                              "local/content_hashes_do_not_match",
-                             "path" => metadata.path_display,
+                             "path" => upload_state.path,
                              "content_hash" => metadata.content_hash,
                              "local_content_hash" => content_hash,
                              )))
                 end
-                push!(metadatas, metadata)
+                upload_state.metadata = metadata
             else
                 @assert entry[".tag"] == "failure"
                 failure = entry["failure"]
                 if failure[".tag"] == "too_many_write_operations"
-                    # TODO: retry only those that failed.
-                    println("Info: Error \"$(failure[".tag"])\"")
-                    println("Info: Waiting for 1 seconds...")
-                    sleep(1)
-                    println("Info: Retrying...")
-                    continue
+                    # we will retry this entry
+                else
+                    throw(DropboxError(failure))
                 end
-                # TODO: Distinguish between those files that succeeded
-                # and those that failed
-                throw(DropboxError(failure))
             end
         end
+
+        if any(upload_state isa Nothing for upload_state in upload_states)
+            println("Info: Error \"too_many_write_operations\"")
+            println("Info: Waiting for 1 seconds...")
+            sleep(1)
+            println("Info: Retrying...")
+            continue
+        end
+
+        metadatas = FileMetadata[upload_state.metadata
+                                 for upload_state in upload_states]
         return metadatas
 
     end
