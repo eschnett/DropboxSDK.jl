@@ -811,7 +811,8 @@ function files_upload(
             end
         end
 
-        if any(upload_state isa Nothing for upload_state in upload_states)
+        if any(upload_state.metadata isa Nothing
+               for upload_state in upload_states)
             println("Info: Error \"too_many_write_operations\"")
             println("Info: Waiting for 1 seconds...")
             sleep(1)
