@@ -17,7 +17,6 @@ end
     first = account.name.given_name
     last = account.name.surname
     display = account.name.display_name
-    # println("    account: name: $first $last ($display)")
     @test first == "Erik"
     @test last == "Schnetter"
     @test display == "Erik Schnetter (PI)"
@@ -26,16 +25,12 @@ end
 @testset "Get space usage" begin
     usage = users_get_space_usage(auth)
     used = usage.used
-    # println("    usage: $(round(Int, used / 1.0e9)) GByte")
     @test used isa Integer
     @test used >= 0
 end
 
 @testset "List folder" begin
     entries = files_list_folder(auth, "", recursive=true)
-    # for (i,entry) in enumerate(entries)
-    #     println("    $i: $(filename(entry))")
-    # end
     @test count(entry -> startswith(entry.path_display, "/$folder"),
                 entries) == 0
 end
