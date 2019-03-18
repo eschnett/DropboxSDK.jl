@@ -67,6 +67,8 @@ end
         write(filename, content)
         lines = runcmd(`put $filename $folder`)
         @test length(lines) == 0
+        lines = runcmd(`put $filename $folder/hello`)
+        @test length(lines) == 0
         lines = runcmd(`put $filename $folder/hello2`)
         @test length(lines) == 0
     end
@@ -79,6 +81,12 @@ end
     @test length(lines) == 2
     @test lines[1] == "hello"
     @test lines[2] == "hello2"
+    lines = runcmd(`ls -l $folder`)
+    @test length(lines) == 2
+    @test startswith(lines[1], "- 14 ")
+    @test startswith(lines[2], "- 14 ")
+    @test endswith(lines[1], " hello")
+    @test endswith(lines[2], " hello2")
 end
 
 
@@ -86,6 +94,10 @@ end
 @testset "Command get" begin
     mktempdir() do dir
         lines = runcmd(`get $folder/hello $dir`)
+        @test length(lines) == 0
+        content = read(joinpath(dir, "hello"))
+        @test String(content) == "Hello, World!\n"
+        lines = runcmd(`get $folder/hello $(joinpath(dir, "hello"))`)
         @test length(lines) == 0
         content = read(joinpath(dir, "hello"))
         @test String(content) == "Hello, World!\n"

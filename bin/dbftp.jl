@@ -3,5 +3,5 @@ Pkg.activate(".")
 
 include("../src/DropboxCLI.jl")
 
-code = DropboxCLI.main(Base.ARGS)
-exit(code)
+exit_code = DropboxCLI.main(Base.ARGS)
+exit(exit_code)

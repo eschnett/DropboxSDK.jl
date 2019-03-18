@@ -70,44 +70,44 @@ add_arg_table(
 
 
 
-const escape_char = Dict{Char, Char}(
-    ' ' => ' ',
-    '"' => '"',
-    '\'' => '\'',
-    '\\' => '\\',
-    '\a' => 'a',
-    '\b' => 'b',
-    '\e' => 'e',
-    '\f' => 'f',
-    '\n' => 'n',
-    '\r' => 'r',
-    '\t' => 't',
-    '\v' => 'v',
-)
-
-function quote_string1(str::AbstractString)::String
-    buf = IOBuffer()
-    for c in str
-        if isprint(c) && c != ' '
-            print(buf, c)
-        else
-            ec = get(escape_char, c, '#')
-            if ec != '#'
-                print(buf, '\\', escape_char[c])
-            else
-                i = UInt(c)
-                if i <= 0xff
-                    print(buf, "\\x", lpad(string(i), 2, '0'))
-                elseif i <= 0xffff
-                    print(buf, "\\u", lpad(string(i), 4, '0'))
-                else
-                    print(buf, "\\U", lpad(string(i), 8, '0'))
-                end
-            end
-        end
-    end
-    String(take!(buf))
-end
+# const escape_char = Dict{Char, Char}(
+#     ' ' => ' ',
+#     '"' => '"',
+#     '\'' => '\'',
+#     '\\' => '\\',
+#     '\a' => 'a',
+#     '\b' => 'b',
+#     '\e' => 'e',
+#     '\f' => 'f',
+#     '\n' => 'n',
+#     '\r' => 'r',
+#     '\t' => 't',
+#     '\v' => 'v',
+# )
+# 
+# function quote_string1(str::AbstractString)::String
+#     buf = IOBuffer()
+#     for c in str
+#         if isprint(c) && c != ' '
+#             print(buf, c)
+#         else
+#             ec = get(escape_char, c, '#')
+#             if ec != '#'
+#                 print(buf, '\\', escape_char[c])
+#             else
+#                 i = UInt(c)
+#                 if i <= 0xff
+#                     print(buf, "\\x", lpad(string(i), 2, '0'))
+#                 elseif i <= 0xffff
+#                     print(buf, "\\u", lpad(string(i), 4, '0'))
+#                 else
+#                     print(buf, "\\U", lpad(string(i), 8, '0'))
+#                 end
+#             end
+#         end
+#     end
+#     String(take!(buf))
+# end
 
 function quote_string(str::AbstractString)::AbstractString
     repr(str)[2:end-1]
@@ -249,7 +249,7 @@ function cmd_get(args)
                 content = read(filename)
                 content_hash = calc_content_hash(content)
                 if content_hash == metadata.content_hash
-                    @show "content hash matches; skipping download"
+                    println("Info: content hash matches; skipping download")
                     need_download = false
                 end
             elseif size < metadata.size
@@ -259,7 +259,8 @@ function cmd_get(args)
                 content = read(filename, metadata.size)
                 content_hash = calc_content_hash(content)
                 if content_hash == metadata.content_hash
-                    @show "content hash matches; truncating local file and skipping download"
+                    println("Info: content hash matches;",
+                            " truncating local file and skipping download")
                     open(filename, "w") do io
                         truncate(io, metadata.size)
                     end
@@ -555,7 +556,7 @@ function cmd_put(args)
                 content = read(source)
                 content_hash = calc_content_hash(content)
                 if metadata.content_hash == content_hash
-                    @show "content hash matches; skipping upload"
+                    println("Info: content hash matches; skipping upload")
                     need_upload = false
                 end
             elseif metadata.size < size
