@@ -343,6 +343,7 @@ function calc_content_hash_add!(cstate::ContentHashState,
         newlen = mod(len, chunksize)
         cstate.buffer = cstate.buffer[end-newlen+1 : end]
     end
+    nothing
 end
 
 export calc_content_hash_get
