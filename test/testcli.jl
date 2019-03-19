@@ -94,7 +94,8 @@ end
 
         lines = runcmd(`cmp $filename $folder/hello2`; wrap=ignorestatus)
         @test length(lines) == 1
-        @test lines[1] == "$(quote_string(filename)): File size differs"
+        quoted_filename = DropboxCLI.quote_string(filename)
+        @test lines[1] == "$quoted_filename: File size differs"
 
         filename2 = joinpath(dir, "hello2")
         content2 = Vector{UInt8}("Hello, World 2!\n")
