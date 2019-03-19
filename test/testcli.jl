@@ -1,3 +1,9 @@
+function quote_string(str::AbstractString)::AbstractString
+    repr(str)[2:end-1]
+end
+
+
+
 function runcmd(args::Cmd; wrap=identity)::Vector{String}
     julia = Base.julia_cmd()
     dbftp = joinpath("..", "bin", "dbftp.jl")
@@ -94,7 +100,7 @@ end
 
         lines = runcmd(`cmp $filename $folder/hello2`; wrap=ignorestatus)
         @test length(lines) == 1
-        quoted_filename = DropboxCLI.quote_string(filename)
+        quoted_filename = quote_string(filename)
         @test lines[1] == "$quoted_filename: File size differs"
 
         filename2 = joinpath(dir, "hello2")
