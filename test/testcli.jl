@@ -1,8 +1,8 @@
-function runcmd(args::Cmd)::Vector{String}
+function runcmd(args::Cmd; wrap=identity)::Vector{String}
     julia = Base.julia_cmd()
     dbftp = joinpath("..", "bin", "dbftp.jl")
     lines = String[]
-    open(`$julia $dbftp $args`) do io
+    open(wrap(`$julia $dbftp $args`)) do io
         skipcount = 0
         for line in eachline(io)
             if skipcount > 0
@@ -67,9 +67,39 @@ end
         write(filename, content)
         lines = runcmd(`put $filename $folder`)
         @test length(lines) == 0
+
         lines = runcmd(`put $filename $folder/hello`)
         @test length(lines) == 0
-        lines = runcmd(`put $filename $folder/hello2`)
+
+        filename2 = joinpath(dir, "hello2")
+        content2 = Vector{UInt8}("Hello, World 2!\n")
+        write(filename2, content2)
+        lines = runcmd(`put $filename2 $folder/hello2`)
+        @test length(lines) == 0
+    end
+end
+
+
+
+@testset "Command cmp" begin
+    mktempdir() do dir
+        filename = joinpath(dir, "hello")
+        content = Vector{UInt8}("Hello, World!\n")
+        write(filename, content)
+        lines = runcmd(`cmp $filename $folder`)
+        @test length(lines) == 0
+
+        lines = runcmd(`cmp $filename $folder/hello`)
+        @test length(lines) == 0
+
+        lines = runcmd(`cmp $filename $folder/hello2`; wrap=ignorestatus)
+        @test length(lines) == 1
+        @test lines[1] == "$filename: File size differs"
+
+        filename2 = joinpath(dir, "hello2")
+        content2 = Vector{UInt8}("Hello, World 2!\n")
+        write(filename2, content2)
+        lines = runcmd(`cmp $filename2 $folder/hello2`)
         @test length(lines) == 0
     end
 end
@@ -81,10 +111,11 @@ end
     @test length(lines) == 2
     @test lines[1] == "hello"
     @test lines[2] == "hello2"
+
     lines = runcmd(`ls -l $folder`)
     @test length(lines) == 2
     @test startswith(lines[1], "- 14 ")
-    @test startswith(lines[2], "- 14 ")
+    @test startswith(lines[2], "- 16 ")
     @test endswith(lines[1], " hello")
     @test endswith(lines[2], " hello2")
 end
@@ -93,18 +124,22 @@ end
 
 @testset "Command get" begin
     mktempdir() do dir
+        filename = joinpath(dir, "hello")
         lines = runcmd(`get $folder/hello $dir`)
         @test length(lines) == 0
-        content = read(joinpath(dir, "hello"))
+        content = read(filename)
         @test String(content) == "Hello, World!\n"
-        lines = runcmd(`get $folder/hello $(joinpath(dir, "hello"))`)
+
+        lines = runcmd(`get $folder/hello $filename`)
         @test length(lines) == 0
         content = read(joinpath(dir, "hello"))
         @test String(content) == "Hello, World!\n"
-        lines = runcmd(`get $folder/hello2 $(joinpath(dir, "hello2"))`)
+
+        filename2 = joinpath(dir, "hello2")
+        lines = runcmd(`get $folder/hello2 $filename2`)
         @test length(lines) == 0
-        content = read(joinpath(dir, "hello2"))
-        @test String(content) == "Hello, World!\n"
+        content2 = read(filename2)
+        @test String(content2) == "Hello, World 2!\n"
     end
 end
 

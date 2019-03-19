@@ -12,6 +12,8 @@ add_arg_table(
     arg_settings,
     "account", Dict(:help => "show account information",
                     :action => :command),
+    "cmp", Dict(:help => "compare (content hash of) files or directories",
+                :action => :command),
     "du", Dict(:help => "show disk usage",
                :action => :command),
     "get", Dict(:help => "get files or directories",
@@ -26,6 +28,14 @@ add_arg_table(
                :action => :command),
     "version", Dict(:help => "delete file or directory",
                     :action => :command),
+)
+
+add_arg_table(
+    arg_settings["cmp"],
+    "filename", Dict(:help => "name of local file or directory to compare",
+                     :nargs => '*'),
+    "destination", Dict(:help => "destination Dropbox file or directory",
+                        :nargs => 'A'),
 )
 
 add_arg_table(
@@ -123,6 +133,146 @@ function cmd_account(args)
     display = account.name.display_name
     println("Account: Name: $first $last ($display)")
     return 0
+end
+
+
+
+function cmd_cmp(args)
+    filenames = args["filename"]
+    if length(filenames) == 0
+        println("Error: No file names given")
+        return 1
+    elseif length(filenames) == 1
+        println("Error: Destination missing")
+        return 1
+    end
+    # The last file name is the destination
+    @assert !haskey(args, "target")
+    destination = filenames[end]
+    sources = filenames[1:end-1]
+
+    exit_code = 0
+
+    auth = get_authorization()
+
+    # Add leading and remove trailing slashes
+    if !startswith(destination, "/")
+        destination = "/$destination"
+    end
+    while endswith(destination, "/")
+        destination = destination[1:end-1]
+    end
+
+    if destination == ""
+        # The root directory does not support files_get_metadata
+        ispath_destination = true
+        isdir_destination = true
+    else
+        try
+            metadata = files_get_metadata(auth, destination)
+            ispath_destination = true
+            isdir_destination = metadata isa FolderMetadata
+        catch ex
+            if ex isa DropboxError
+                if ex.dict["error"][".tag"] == "path" &&
+                    ex.dict["error"]["path"][".tag"] == "not_found"
+                    ispath_destination = false
+                    isdir_destination = false
+                else
+                    println("$(quote_string(filename)):",
+                            " $(ex.dict["error_summary"])")
+                    return 1
+                end
+            else
+                rethrow(ex)
+            end
+        end
+    end
+
+    if !isdir_destination && length(sources) != 1
+        # Multiple sources: Destination is not a directory
+        println("Destination directory \"$destination\" does not exist")
+        return 1
+    end
+
+    for source in sources
+
+        # Distinguish between files and directories
+        if !ispath(source)
+            println("$source: File not found")
+            continue
+        end
+        isdir_source = isdir(source)
+
+        if isdir_destination
+            # If the destination is a directory, the files will be
+            # downloaded into that directory.
+            filename = joinpath(destination, basename(source))
+        elseif length(sources) == 1 && !isdir_source
+            # If there is only a single source
+            if ispath_destination
+                # If the destination exists and is not a directory,
+                # then it is overwritten.
+                @assert !isdirpath(destination)
+                filename = destination
+            else
+                # If the destination does not exist, then a file with
+                # that name will be created.
+                filename = destination
+                pathname = dirname(filename)
+            end
+        else
+            # Multiple sources: Destination is not a directory
+            @assert false
+        end
+
+        # Add leading and remove trailing slashes
+        if !startswith(filename, "/")
+            filename = "/$filename"
+        end
+        while endswith(filename, "/")
+            filename = filename[1:end-1]
+        end
+
+        # TODO: Handle sources that are a directory
+        @assert !isdir_source
+
+        # Compare content hash
+        metadata = try
+            files_get_metadata(auth, filename)
+        catch ex
+            if ex isa DropboxError
+                println("$(quote_string(filename)):",
+                        " $(ex.dict["error_summary"])")
+                exit_code = 1
+                continue
+            else
+                rethrow(ex)
+            end
+        end
+        if !(metadata isa FileMetadata)
+            println("$(quote_string(source)): Not a file")
+            exit_code = 2
+        else
+            size = filesize(source)
+            if metadata.size != size
+                println("$(quote_string(source)): File size differs")
+                exit_code = 2
+            else
+                content = read(source)
+                content_hash = calc_content_hash(content)
+                if metadata.content_hash != content_hash
+                    println("$(quote_string(source)): Content hash differs")
+                    exit_code = 2
+                else
+                    # println("$(quote_string(source)): no difference")
+                end
+            end
+        end
+
+    end
+
+    return exit_code
 end
 
 
@@ -587,7 +737,19 @@ function cmd_put(args)
         Tuple{String, ContentIterator}
 
         dst, src = upload
-        dst, ContentIterator([read(src)])
+        # Read in chunks of 150 MByte
+        chunksize = 150 * 1024 * 1024
+        # TODO: Read only on demand
+        chunks = Vector{UInt8}[]
+        open(src, "r") do io
+            while !eof(io)
+                chunk = read(io, chunksize)
+                if !isempty(chunk)
+                    push!(chunks, chunk)
+                end
+            end
+        end
+        dst, ContentIterator(chunks)
     end
 
     # Create upload iterator for several files
@@ -669,6 +831,7 @@ end
 
 const cmds = Dict(
     "account" => cmd_account,
+    "cmp" => cmd_cmp,
     "du" => cmd_du,
     "get" => cmd_get,
     "ls" => cmd_ls,
