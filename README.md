@@ -12,18 +12,47 @@ command line client `dbftp`.
 
 
 
+## Installation
+
+You install this package in the usual way via
+
+```Julia
+using Pkg
+Pkg.add("DropboxSDK")
+```
+
+
+
 ## Setup
 
-(Discuss authorization tokens. Upshot: get your token
-[here](https://www.dropbox.com/developers/apps/create), then save it
-into a file `secrets.http` that should look like
+Before you can using this package to access your Dropbox account, you
+need to obtain an *authorization token*. This is essentially a
+password that allows an application to access your Dropbox account on
+your behalf. 
+
+**Note:** A token is like a password; treat it accordingly -- make
+sure it never ends up in a repository, on a command line, in log file,
+etc.
+
+To obtain an authorization token, go to [this
+page](https://www.dropbox.com/developers/apps/create) and follow the
+instructions there. You can call the app e.g. `Julia SDK`. You have
+the option to "sandbox" the token by restricting it to an app-specific
+subdirectory. This is a good idea for testing.
+
+Save the token into a file `.dropboxsdk.http` in your home directory.
+The file should look like
 
 ```
 access_token:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
-A token is like a password; treat it accordingly -- make sure it never
-ends up in a repository, command line, log file, etc.)
+where the `xxx` are replaced by the authorization token that looks
+like a random string of letters and numbers.
+
+Make sure the file is owned by you, and that no one else can read it
+(`chmod go-rwx ~/.dropboxsdk.http`). As a security precaution,
+`DropboxSDK` will refuse to read the file otherwise.
 
 
 
@@ -33,15 +62,24 @@ ends up in a repository, command line, log file, etc.)
 julia bin/dbftp.jl help
 ```
 
-These CLI commands are implemented:
+The command line client works similar to `sftp`. (There is no REPL
+yet.) These commands are implemented:
 
 - `account`: Display account information
+- `cmp`: Compare files (compare content hashes)
 - `du`: Display space usage
 - `get`: Download files
+- `help`: Get help
 - `ls`: List files
 - `mkdir`: Create directory
+- `put`: Upload files
 - `rm`: Delete file or directory
 - `version`: Show version number
+
+Note that `rm` can delete non-empty directories. This is a convenient
+way to delete large numbers of files in a very short time. Deleted
+files can be restored (using e.g. the Dropbox web interface) for some
+weeks or months.
 
 
 
@@ -70,3 +108,22 @@ There are also a few local helper functions:
 - `calc_content_hash_init`
 - `calc_content_hash`
 - `get_authorization`
+
+The command line interface and the test cases also contain good
+pointers for how to use this API.
+
+Given how the Dropbox API is designed, it seems that Dropbox considers
+metadata write operations to be particularly expensive. (These are
+operations that modify how a directory looks.) Metadata write
+operations are thus strongly rate limited.
+
+For example, running two instances of `dbftp` simultaneously will
+almost certainly result in temporary errors and retries. (`DropboxSDK`
+detects temporary errors, and retries automatically. However, this
+still slows things down.) Dropbox offers special functions to e.g.
+upload many files simultaneously. `DropboxSDK` uses these, although
+not yet in parallel.
+
+Conversely, metadata read operations (e.g. reading a directory or
+downloading a file) seem efficient, and these operations can
+presumably run in parallel.
