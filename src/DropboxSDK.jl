@@ -8,6 +8,11 @@ using SHA
 
 
 
+geteuid()::Int = ccall(:geteuid, Cint, ())
+getuid()::Int = ccall(:getuid, Cint, ())
+
+
+
 """
     mapget(fun::Function, dict::Dict, key, def=nothing)
 
@@ -72,9 +77,30 @@ function get_authorization()::Authorization
         access_token = get(ENV, "DROPBOXSDK_ACCESS_TOKEN", nothing)
     end
     if access_token === nothing
-        conf = ConfParse("secrets.http")
-        parse_conf!(conf)
-        access_token = retrieve(conf, "access_token")
+        try
+            # Ensure that the file containing the access token is a
+            # simple file, is owned by the user, and is only
+            # accessible by the user
+            filename = joinpath(homedir(), ".dropboxsdk.http")
+            st = stat(filename)
+            if ispath(st)
+                if !isfile(st)
+                    println("Configuration file \"$filename\" exists,",
+                            " but is not a file")
+                elseif st.uid != geteuid()
+                    println("Configuration file \"$filename\" exists,",
+                            " but is not owned by the current effective user")
+                elseif filemode(st) & 0o077 != 0
+                    println("Configuration file \"$filename\" exists,",
+                            " but is accessible by others")
+                else
+                    conf = ConfParse(filename)
+                    parse_conf!(conf)
+                    access_token = retrieve(conf, "access_token")
+                end
+            end
+        catch
+        end
     end
     if access_token === nothing
         error("Could not find access token for Dropbox")
