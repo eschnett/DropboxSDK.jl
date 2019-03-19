@@ -823,7 +823,7 @@ function files_upload(
                              "local/content_hashes_do_not_match",
                              "path" => upload_state.path,
                              "content_hash" => metadata.content_hash,
-                             "local_content_hash" => content_hash,
+                             "local_content_hash" => upload_state.content_hash,
                              )))
                 end
                 upload_state.metadata = metadata
