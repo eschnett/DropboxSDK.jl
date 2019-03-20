@@ -82,6 +82,14 @@ end
         write(filename2, content2)
         lines = runcmd(`put $filename2 $folder/hello2`)
         @test length(lines) == 0
+
+        dirname = joinpath(dir, "dir")
+        mkdir(dirname)
+        filename3 = joinpath(dirname, "hello3")
+        content3 = Vector{UInt8}("Hello, World 3!\n")
+        write(filename3, content3)
+        lines = runcmd(`put $dirname $folder`)
+        @test length(lines) == 0
     end
 end
 
@@ -108,6 +116,15 @@ end
         write(filename2, content2)
         lines = runcmd(`cmp $filename2 $folder/hello2`)
         @test length(lines) == 0
+
+        # TODO: compare recursively
+        dirname = joinpath(dir, "dir")
+        mkdir(dirname)
+        filename3 = joinpath(dirname, "hello3")
+        content3 = Vector{UInt8}("Hello, World 3!\n")
+        write(filename3, content3)
+        lines = runcmd(`cmp $filename3 $folder/dir/hello3`)
+        @test length(lines) == 0
     end
 end
 
@@ -115,16 +132,19 @@ end
 
 @testset "Command ls" begin
     lines = runcmd(`ls $folder`)
-    @test length(lines) == 2
-    @test lines[1] == "hello"
-    @test lines[2] == "hello2"
+    @test length(lines) == 3
+    @test lines[1] == "dir"
+    @test lines[2] == "hello"
+    @test lines[3] == "hello2"
 
     lines = runcmd(`ls -l $folder`)
-    @test length(lines) == 2
-    @test startswith(lines[1], "- 14 ")
-    @test startswith(lines[2], "- 16 ")
-    @test endswith(lines[1], " hello")
-    @test endswith(lines[2], " hello2")
+    @test length(lines) == 3
+    @test startswith(lines[1], "d    ")
+    @test startswith(lines[2], "- 14 ")
+    @test startswith(lines[3], "- 16 ")
+    @test endswith(lines[1], " dir")
+    @test endswith(lines[2], " hello")
+    @test endswith(lines[3], " hello2")
 end
 
 
@@ -147,6 +167,16 @@ end
         @test length(lines) == 0
         content2 = read(filename2)
         @test String(content2) == "Hello, World 2!\n"
+
+        # TODO: download recursively
+        dirname = joinpath(dir, "dir")
+        mkdir(dirname)
+        filename3 = joinpath(dirname, "hello3")
+        content3 = Vector{UInt8}("Hello, World 3!\n")
+        lines = runcmd(`get $folder/dir/hello3 $filename3`)
+        @test length(lines) == 0
+        content3 = read(filename3)
+        @test String(content3) == "Hello, World 3!\n"
     end
 end
 

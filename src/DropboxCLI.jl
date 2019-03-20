@@ -637,14 +637,7 @@ function cmd_put(args)
         end
     end
 
-    if !isdir_destination && length(sources) != 1
-        # Multiple sources: Destination is not a directory
-        println("Destination directory \"$destination\" does not exist")
-        return 1
-    end
-
-    uploads = Tuple{String, String}[]
-
+    want_uploads = Tuple{String, String}[]
     for source in sources
 
         # Distinguish between files and directories
@@ -656,10 +649,10 @@ function cmd_put(args)
 
         if isdir_destination
             # If the destination is a directory, the files will be
-            # downloaded into that directory.
+            # uploaded into that directory.
             filename = joinpath(destination, basename(source))
         elseif length(sources) == 1 && !isdir_source
-            # If there is only a single source
+            # If there is only a single source that is not a directory
             if ispath_destination
                 # If the destination exists and is not a directory,
                 # then it is overwritten.
@@ -672,8 +665,16 @@ function cmd_put(args)
                 pathname = dirname(filename)
             end
         else
-            # Multiple sources: Destination is not a directory
-            @assert false
+            if ispath_destination && !isdir_destination
+                # Multiple sources: Destination exists, but is not a directory
+                println("Destination \"$destination\" exists,",
+                        " but is not a directory")
+                return 1
+            else
+                # Multiple sources: Destination does not exist
+                filename = destination
+                pathname = dirname(filename)
+            end
         end
 
         # Add leading and remove trailing slashes
@@ -684,9 +685,30 @@ function cmd_put(args)
             filename = filename[1:end-1]
         end
 
-        # TODO: Handle sources that are a directory
-        @assert !isdir_source
+        if !isdir_source
+            # The source is a regular file
+            push!(want_uploads, (filename, source))
+        else
+            # Both source and destination are directories
+            function walk_upload_entry(source_prefix::String,
+                                       filename_prefix::String)
+                for entry in readdir(source)
+                    source = joinpath(source_prefix, entry)
+                    filename = "$filename_prefix/$entry"
+                    if isdir(source)
+                        walk_upload_entry(source, filename)
+                    else
+                        push!(want_uploads, (filename, source))
+                    end
+                end
+            end
+            walk_upload_entry(source, filename)
+        end
+    end
 
+    uploads = Tuple{String, String}[]
+    for (filename, source) in want_uploads
+        println("Info: Comparing content hash of $source")
         # Compare content hash before uploading
         need_upload = true
         content = nothing
@@ -729,7 +751,6 @@ function cmd_put(args)
             # of iterators.
             push!(uploads, (filename, source))
         end
-
     end
 
     # Create upload iterator for a single file
@@ -737,18 +758,25 @@ function cmd_put(args)
         Tuple{String, ContentIterator}
 
         dst, src = upload
+        print("Info: Uploading $src")
+        flush(stdout)
         # Read in chunks of 150 MByte
         chunksize = 150 * 1024 * 1024
         # TODO: Read only on demand
         chunks = Vector{UInt8}[]
+        bytes_read = Int64(0)
         open(src, "r") do io
             while !eof(io)
                 chunk = read(io, chunksize)
+                bytes_read += length(chunk)
                 if !isempty(chunk)
                     push!(chunks, chunk)
+                    print("\rInfo: Uploading $src ($bytes_read bytes)")
+                    flush(stdout)
                 end
             end
         end
+        println()
         dst, ContentIterator(chunks)
     end
 
