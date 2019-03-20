@@ -712,7 +712,7 @@ function cmd_put(args)
     n = length(want_uploads)
     for (i, (filename, source)) in enumerate(want_uploads)
         println("Info: Comparing content hash ($i/$n):",
-                " $(quote_string($source))")
+                " $(quote_string(source))")
         # Compare content hash before uploading
         need_upload = true
         content = nothing
@@ -732,7 +732,7 @@ function cmd_put(args)
                 content = read(source)
                 content_hash = calc_content_hash(content)
                 if metadata.content_hash == content_hash
-                    println("Info: $(quote_string($source)):",
+                    println("Info: $(quote_string(source)):",
                             " content hash matches; skipping upload")
                     need_upload = false
                 end
@@ -763,7 +763,7 @@ function cmd_put(args)
         Tuple{String, ContentIterator}
 
         dst, src = upload
-        print("Info: Uploading ($i/$n): $(quote_string($src))")
+        print("Info: Uploading ($i/$n): $(quote_string(src))")
         flush(stdout)
         # Read in chunks of 150 MByte
         chunksize = 150 * 1024 * 1024
@@ -777,13 +777,13 @@ function cmd_put(args)
                 if !isempty(chunk)
                     push!(chunks, chunk)
                     print("\rInfo: Uploading ($i/$n):",
-                          " $(quote_string($src)) ($bytes_read bytes...)")
+                          " $(quote_string(src)) ($bytes_read bytes...)")
                     flush(stdout)
                 end
             end
         end
         print("\rInfo: Uploading ($i/$n):",
-              " $(quote_string($src)) ($bytes_read bytes)   ")
+              " $(quote_string(src)) ($bytes_read bytes)   ")
         println("\r")
         # TODO: read on demand; free data when done
         dst, ContentIterator(chunks)
