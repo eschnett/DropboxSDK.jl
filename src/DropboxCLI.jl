@@ -399,7 +399,8 @@ function cmd_get(args)
                 content = read(filename)
                 content_hash = calc_content_hash(content)
                 if content_hash == metadata.content_hash
-                    println("Info: content hash matches; skipping download")
+                    println("Info: $(quote_string(filename)):",
+                            " content hash matches; skipping download")
                     need_download = false
                 end
             elseif size < metadata.size
@@ -409,7 +410,8 @@ function cmd_get(args)
                 content = read(filename, metadata.size)
                 content_hash = calc_content_hash(content)
                 if content_hash == metadata.content_hash
-                    println("Info: content hash matches;",
+                    println("Info: $(quote_string(filename)):",
+                            " content hash matches;",
                             " truncating local file and skipping download")
                     open(filename, "w") do io
                         truncate(io, metadata.size)
@@ -707,8 +709,10 @@ function cmd_put(args)
     end
 
     uploads = Tuple{String, String}[]
-    for (filename, source) in want_uploads
-        println("Info: Comparing content hash of $source")
+    n = length(want_uploads)
+    for (i, (filename, source)) in enumerate(want_uploads)
+        println("Info: Comparing content hash ($i/$n):",
+                " $(quote_string($source))")
         # Compare content hash before uploading
         need_upload = true
         content = nothing
@@ -728,7 +732,8 @@ function cmd_put(args)
                 content = read(source)
                 content_hash = calc_content_hash(content)
                 if metadata.content_hash == content_hash
-                    println("Info: content hash matches; skipping upload")
+                    println("Info: $(quote_string($source)):",
+                            " content hash matches; skipping upload")
                     need_upload = false
                 end
             elseif metadata.size < size
@@ -754,11 +759,11 @@ function cmd_put(args)
     end
 
     # Create upload iterator for a single file
-    function make_upload_iter(upload::Tuple{String, String})::
+    function make_upload_iter(i, n, upload::Tuple{String, String})::
         Tuple{String, ContentIterator}
 
         dst, src = upload
-        print("Info: Uploading $src")
+        print("Info: Uploading ($i/$n): $(quote_string($src))")
         flush(stdout)
         # Read in chunks of 150 MByte
         chunksize = 150 * 1024 * 1024
@@ -771,12 +776,16 @@ function cmd_put(args)
                 bytes_read += length(chunk)
                 if !isempty(chunk)
                     push!(chunks, chunk)
-                    print("\rInfo: Uploading $src ($bytes_read bytes)")
+                    print("\rInfo: Uploading ($i/$n):",
+                          " $(quote_string($src)) ($bytes_read bytes...)")
                     flush(stdout)
                 end
             end
         end
-        println()
+        print("\rInfo: Uploading ($i/$n):",
+              " $(quote_string($src)) ($bytes_read bytes)   ")
+        println("\r")
+        # TODO: read on demand; free data when done
         dst, ContentIterator(chunks)
     end
 
@@ -784,8 +793,10 @@ function cmd_put(args)
     function make_uploads_iter(uploads::Vector{Tuple{String, String}})::
         StatefulIterator{Tuple{String, ContentIterator}}
 
+        n = length(uploads)
         StatefulIterator{Tuple{String, ContentIterator}}(
-            make_upload_iter(upload) for upload in uploads)
+            make_upload_iter(i, n, upload)
+            for (i, upload) in enumerate(uploads))
     end
 
     files_upload(auth, make_uploads_iter(uploads))
