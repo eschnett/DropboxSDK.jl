@@ -34,18 +34,6 @@ include("types.jl")
 
 ################################################################################
 
-# """
-#     struct Error
-#         dict::Dict{String, Any}
-#     end
-# 
-# Return value if a request failed. The content is a dictionary
-# containing the parsed JSON error response.
-# """
-# struct Error
-#     dict::Dict{String, Any}
-# end
-
 
 
 export Authorization
@@ -559,7 +547,7 @@ function files_upload(auth::Authorization,
                       content::ContentIterator)::FileMetadata
     session_id = nothing
     offset = Int64(0)
-    cstate = calc_content_hash_init()
+    cdata, chash = content_hasher()
     while !isempty(content.iterator)
         chunk = popfirst!(content.iterator)::Vector{UInt8}
         isempty(chunk) && continue
@@ -582,7 +570,7 @@ function files_upload(auth::Authorization,
                                       args, chunk)
         end
         offset = offset + length(chunk)
-        calc_content_hash_add!(cstate, chunk)
+        put!(cdata, chunk)
     end
     if session_id === nothing
         # The file was empty
@@ -611,7 +599,8 @@ function files_upload(auth::Authorization,
     end
 
     # Check content hash
-    content_hash = calc_content_hash_get(cstate)
+    close(cdata)
+    content_hash = take!(chash)
     if metadata.content_hash != content_hash
         throw(DropboxError(
             Dict("error" => "LocalContentHashMismatch",
@@ -659,7 +648,7 @@ function files_upload(auth::Authorization,
 
         session_id = nothing
         offset = Int64(0)
-        cstate = calc_content_hash_init()
+        cdata, chash = content_hasher()
         while !isempty(content.iterator)
             chunk = popfirst!(content.iterator)::Vector{UInt8}
             isempty(chunk) && continue
@@ -683,7 +672,7 @@ function files_upload(auth::Authorization,
                                           args, chunk)
             end
             offset = offset + length(chunk)
-            calc_content_hash_add!(cstate, chunk)
+            put!(cdata, chunk)
         end
         # TODO: We need to close only the last session. But what does
         # "last" mean? Is it "last session id passed to
@@ -710,7 +699,8 @@ function files_upload(auth::Authorization,
                                       args, UInt8[])
         end
 
-        content_hash = calc_content_hash_get(cstate)
+        close(cdata)
+        content_hash = take!(chash)
         push!(upload_states,
               UploadState(path, session_id, offset, content_hash, nothing))
     end
