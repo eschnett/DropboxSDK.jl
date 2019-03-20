@@ -12,6 +12,33 @@ filename(entry) =
     @test auth isa Authorization
 end
 
+@testset "Calculate content hash" begin
+    content = read(joinpath("..", "data", "ssc2006-02a1_Lrg.jpg"))
+    @assert length(content) == 6056980
+    content_hash = calc_content_hash(content)
+    @test (content_hash ==
+           "8a6ebea6983dc68be1575676d3a8ec0d664cfee69b2dbcdf44087cf5d455fe12")
+
+    len = length(content)
+    di = 1234567
+    contents = []
+    for i in 1:di:len
+        push!(contents, @view content[i : min(len, i + di - 1)])
+    end
+    @assert sum(length.(contents)) == length(content)
+    # @assert vcat(contents...) == content
+
+    cstate = calc_content_hash_init()
+    for content in contents
+        calc_content_hash_add!(cstate, content)
+    end
+    content_hash = calc_content_hash_get(cstate)
+    @test (content_hash ==
+           "8a6ebea6983dc68be1575676d3a8ec0d664cfee69b2dbcdf44087cf5d455fe12")
+end
+
+
+
 @testset "Get current account" begin
     account = users_get_current_account(auth)
     first = account.name.given_name

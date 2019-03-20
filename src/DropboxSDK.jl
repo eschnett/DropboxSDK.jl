@@ -336,7 +336,7 @@ function calc_content_hash_add!(cstate::ContentHashState,
     chunksize = 4 * 1024 * 1024
     len = length(cstate.buffer)
     if len >= chunksize
-        for offset in 1:chunksize:len
+        for offset in 1 : chunksize : len-chunksize+1
             chunk = @view cstate.buffer[offset : min(offset+chunksize-1, len)]
             append!(cstate.chunksums, sha256(chunk))
         end
@@ -353,8 +353,11 @@ export calc_content_hash_get
 Calculate the current content hash.
 """
 function calc_content_hash_get(cstate::ContentHashState)::String
-    extra = isempty(cstate.buffer) ? UInt8[] : sha256(cstate.buffer)
-    bytes2hex(sha256(UInt8[cstate.chunksums; extra]))
+    chunksums = cstate.chunksums
+    if !isempty(cstate.buffer)
+        chunksums = vcat(chunksums, sha256(cstate.buffer))
+    end
+    bytes2hex(sha256(chunksums))
 end
 
 

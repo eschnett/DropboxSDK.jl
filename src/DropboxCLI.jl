@@ -692,6 +692,7 @@ function cmd_put(args)
             push!(want_uploads, (filename, source))
         else
             # Both source and destination are directories
+            @show source filename
             function walk_upload_entry(source_prefix::String,
                                        filename_prefix::String)
                 for entry in readdir(source)
@@ -700,6 +701,7 @@ function cmd_put(args)
                     if isdir(source)
                         walk_upload_entry(source, filename)
                     else
+                        @show source filename
                         push!(want_uploads, (filename, source))
                     end
                 end
@@ -785,6 +787,7 @@ function cmd_put(args)
         print("\rInfo: Uploading ($i/$n):",
               " $(quote_string(src)) ($bytes_read bytes)   ")
         println("\r")
+        flush(stdout)
         # TODO: read on demand; free data when done
         dst, ContentIterator(chunks)
     end
