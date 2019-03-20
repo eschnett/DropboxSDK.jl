@@ -35,6 +35,15 @@ end
     content_hash = calc_content_hash_get(cstate)
     @test (content_hash ==
            "8a6ebea6983dc68be1575676d3a8ec0d664cfee69b2dbcdf44087cf5d455fe12")
+
+    cdata, chash = content_hasher()
+    for content in contents
+        put!(cdata, content)
+    end
+    close(cdata)
+    content_hash = take!(chash)
+    @test (content_hash ==
+           "8a6ebea6983dc68be1575676d3a8ec0d664cfee69b2dbcdf44087cf5d455fe12")
 end
 
 

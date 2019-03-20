@@ -692,7 +692,6 @@ function cmd_put(args)
             push!(want_uploads, (filename, source))
         else
             # Both source and destination are directories
-            @show source filename
             function walk_upload_entry(source_prefix::String,
                                        filename_prefix::String)
                 for entry in readdir(source)
@@ -701,7 +700,6 @@ function cmd_put(args)
                     if isdir(source)
                         walk_upload_entry(source, filename)
                     else
-                        @show source filename
                         push!(want_uploads, (filename, source))
                     end
                 end
@@ -761,9 +759,8 @@ function cmd_put(args)
     end
 
     # Create upload iterator for a single file
-    function make_upload_iter(i, n, upload::Tuple{String, String})::
-        Tuple{String, ContentIterator}
-
+    function make_upload_iter(i, n, upload::Tuple{String, String}
+                              )::Tuple{String, ContentIterator}
         dst, src = upload
         print("Info: Uploading ($i/$n): $(quote_string(src))")
         flush(stdout)
@@ -793,16 +790,21 @@ function cmd_put(args)
     end
 
     # Create upload iterator for several files
-    function make_uploads_iter(uploads::Vector{Tuple{String, String}})::
-        StatefulIterator{Tuple{String, ContentIterator}}
-
+    function make_uploads_iter(uploads::AbstractVector{Tuple{String, String}}
+                               )::StatefulIterator{Tuple{String,
+                                                         ContentIterator}}
         n = length(uploads)
         StatefulIterator{Tuple{String, ContentIterator}}(
             make_upload_iter(i, n, upload)
             for (i, upload) in enumerate(uploads))
     end
 
-    files_upload(auth, make_uploads_iter(uploads))
+    len = length(uploads)
+    batchsize = 10              #TODO 1000
+    for offset in 1:batchsize:len
+        batch = @view uploads[offset : min(len, offset+batchsize-1)]
+        files_upload(auth, make_uploads_iter(batch))
+    end
 
     return exit_code
 end

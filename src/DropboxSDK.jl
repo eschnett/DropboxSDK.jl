@@ -181,7 +181,6 @@ function post_content_upload(auth::Authorization,
                              fun::String,
                              args::Union{Nothing, Dict},
                              content::Vector{UInt8})::Union{Nothing, Dict}
-
     headers = ["Authorization" => "Bearer $(auth.access_token)",
                ]
     push!(headers, "Dropbox-API-Arg" => JSON.json(args))
@@ -233,9 +232,8 @@ Post a Content Download request to the Dropbox API.
 """
 function post_content_download(auth::Authorization,
                                fun::String,
-                               args::Union{Nothing, Dict})::
-    Tuple{Dict, Vector{UInt8}}
-
+                               args::Union{Nothing, Dict}
+                               )::Tuple{Dict, Vector{UInt8}}
     headers = ["Authorization" => "Bearer $(auth.access_token)",
                ]
     push!(headers, "Dropbox-API-Arg" => JSON.json(args))
@@ -294,7 +292,7 @@ function calc_content_hash(data::AbstractVector{UInt8})::String
     chunksize = 4 * 1024 * 1024
     len = length(data)
     for offset in 1:chunksize:len
-        chunk = @view data[offset : min(offset+chunksize-1, len)]
+        chunk = @view data[offset : min(len, offset+chunksize-1)]
         append!(chunksums, sha256(chunk))
     end
     bytes2hex(sha256(chunksums))
@@ -302,62 +300,35 @@ end
 
 
 
-export ContentHashState
-mutable struct ContentHashState
-    chunksums::Vector{UInt8}
-    # TODO: Don't buffer the data; instead, use SHA256_CTX to handle
-    # partial chunks
-    buffer::Vector{UInt8}
-
-    ContentHashState() = new(UInt8[], UInt8[])
-end
-
-export calc_content_hash_init
-"""
-    calc_content_hash_init()::ContentHashState
-
-Initialize calculating a content hash in chunks.
-"""
-function calc_content_hash_init()::ContentHashState
-    ContentHashState()
-end
-
-export calc_content_hash_add!
-"""
-    calc_content_hash_add!(cstate::ContentHashState,
-                           data::AbstractVector{UInt8}
-                          )::Nothing
-
-Add a chunk of data to the content hash.
-"""
-function calc_content_hash_add!(cstate::ContentHashState,
-                                data::AbstractVector{UInt8})::Nothing
-    append!(cstate.buffer, data)
-    chunksize = 4 * 1024 * 1024
-    len = length(cstate.buffer)
-    if len >= chunksize
-        for offset in 1 : chunksize : len-chunksize+1
-            chunk = @view cstate.buffer[offset : min(offset+chunksize-1, len)]
-            append!(cstate.chunksums, sha256(chunk))
+export content_hasher
+function content_hasher()::Tuple{Channel{AbstractVector{UInt8}},
+                                 Channel{String}}
+    chash = Channel{String}(0)
+    function calc_hash(cdata::Channel{AbstractVector{UInt8}})
+        chunksize = 4 * 1024 * 1024
+        chunksums = UInt8[]
+        # TODO: Don't buffer the data; instead, use SHA256_CTX to
+        # handle partial chunks
+        buffer = UInt8[]
+        for data in cdata
+            append!(buffer, data)
+            len = length(buffer)
+            if len >= chunksize
+                for offset in 1 : chunksize : len-chunksize+1
+                    chunk = @view buffer[offset : offset+chunksize-1]
+                    append!(chunksums, sha256(chunk))
+                end
+                newlen = mod(len, chunksize)
+                buffer = buffer[end-newlen+1 : end]
+            end
         end
-        newlen = mod(len, chunksize)
-        cstate.buffer = cstate.buffer[end-newlen+1 : end]
+        if !isempty(buffer)
+            append!(chunksums, sha256(buffer))
+        end
+        put!(chash, bytes2hex(sha256(chunksums)))
     end
-    nothing
-end
-
-export calc_content_hash_get
-"""
-    calc_content_hash_get(cstate::ContentHashState)::String
-
-Calculate the current content hash.
-"""
-function calc_content_hash_get(cstate::ContentHashState)::String
-    chunksums = cstate.chunksums
-    if !isempty(cstate.buffer)
-        chunksums = vcat(chunksums, sha256(cstate.buffer))
-    end
-    bytes2hex(sha256(chunksums))
+    cdata = Channel(calc_hash, ctype=AbstractVector{UInt8})
+    cdata, chash
 end
 
 
@@ -678,11 +649,9 @@ simultaneously (TODO: avoid this limitation.)
 
 This function is efficient if many or larger files are uploaded.
 """
-function files_upload(
-    auth::Authorization,
-    contents::StatefulIterator{Tuple{String, ContentIterator}})::
-    Vector{FileMetadata}
-    
+function files_upload(auth::Authorization,
+                      contents::StatefulIterator{Tuple{String, ContentIterator}}
+                      )::Vector{FileMetadata}
     upload_states = UploadState[]
     # TODO: can handle only 1000 files at once
     # TODO: parallelize loop
