@@ -28,12 +28,12 @@ end
     @assert sum(length.(contents)) == length(content)
     # @assert vcat(contents...) == content
 
-    cdata, chash = content_hasher()
+    data_channel, content_hash_channel = calc_content_hash_start()
     for content in contents
-        put!(cdata, content)
+        put!(data_channel, content)
     end
-    close(cdata)
-    content_hash = take!(chash)
+    close(data_channel)
+    content_hash = take!(content_hash_channel)
     @test (content_hash ==
            "8a6ebea6983dc68be1575676d3a8ec0d664cfee69b2dbcdf44087cf5d455fe12")
 end
@@ -125,6 +125,22 @@ end
     @test count(entry -> entry.path_display == "/$folder/file1", entries) == 1
 end
 
+@testset "Upload file in chunks" begin
+    upload_channel, metadata_channel =
+        files_upload_start(auth, "/$folder/file1")
+    put!(upload_channel, Vector{UInt8}("Hello, "))
+    put!(upload_channel, Vector{UInt8}("World!\n"))
+    close(upload_channel)
+    metadata = take!(metadata_channel)
+    @test metadata isa FileMetadata
+    @test metadata.size == length("Hello, World!\n")
+    entries = files_list_folder(auth, "/$folder", recursive=true)
+    @test count(entry -> startswith(entry.path_display, "/$folder"),
+                entries) == 4
+    @test count(entry -> entry.path_display == "/$folder", entries) == 1
+    @test count(entry -> entry.path_display == "/$folder/file1", entries) == 1
+end
+
 @testset "Download file" begin
     metadata, content = files_download(auth, "/$folder/file1")
     @test metadata.path_display == "/$folder/file1"
@@ -156,6 +172,33 @@ const numfiles = 4
         ("/$folder/files$i", ContentIterator(Iterators.repeated(chunk, i)))
         for i in 0:numfiles-1)
     metadatas = files_upload(auth, contents)
+    @test length(metadatas) == numfiles
+    @test all(metadata isa FileMetadata for metadata in metadatas)
+    @test all(metadata.size == (i-1) * length("Hello, World!\n")
+              for (i,metadata) in enumerate(metadatas))
+    entries = files_list_folder(auth, "/$folder", recursive=true)
+    @test count(entry -> startswith(entry.path_display, "/$folder"),
+                entries) == numfiles + 5
+    @test count(entry -> entry.path_display == "/$folder", entries) == 1
+    for i in 0:numfiles-1
+        @test count(entry -> entry.path_display == "/$folder/files$i",
+                    entries) == 1
+    end
+end
+
+@testset "Upload several files" begin
+    upload_spec_channel, metadatas_channel = files_upload_start(auth)
+    for i in 0:numfiles-1
+        data_channel = Channel{Vector{UInt8}}(0)
+        put!(upload_spec_channel,
+             UploadSpec(data_channel, "/$folder/files$i"))
+        for j in 1:i
+            put!(data_channel, Vector{UInt8}("Hello, World!\n"))
+        end
+        close(data_channel)
+    end
+    close(upload_spec_channel)
+    metadatas = take!(metadatas_channel)
     @test length(metadatas) == numfiles
     @test all(metadata isa FileMetadata for metadata in metadatas)
     @test all(metadata.size == (i-1) * length("Hello, World!\n")
