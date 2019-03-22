@@ -113,17 +113,17 @@ end
     @test String(content) == ""
 end
 
-@testset "Upload file in chunks" begin
-    content = map(Vector{UInt8}, ["Hello, ","World!\n"])
-    metadata = files_upload(auth, "/$folder/file1", ContentIterator(content))
-    @test metadata isa FileMetadata
-    @test metadata.size == length("Hello, World!\n")
-    entries = files_list_folder(auth, "/$folder", recursive=true)
-    @test count(entry -> startswith(entry.path_display, "/$folder"),
-                entries) == 4
-    @test count(entry -> entry.path_display == "/$folder", entries) == 1
-    @test count(entry -> entry.path_display == "/$folder/file1", entries) == 1
-end
+# @testset "Upload file in chunks" begin
+#     content = map(Vector{UInt8}, ["Hello, ","World!\n"])
+#     metadata = files_upload(auth, "/$folder/file1", ContentIterator(content))
+#     @test metadata isa FileMetadata
+#     @test metadata.size == length("Hello, World!\n")
+#     entries = files_list_folder(auth, "/$folder", recursive=true)
+#     @test count(entry -> startswith(entry.path_display, "/$folder"),
+#                 entries) == 4
+#     @test count(entry -> entry.path_display == "/$folder", entries) == 1
+#     @test count(entry -> entry.path_display == "/$folder/file1", entries) == 1
+# end
 
 @testset "Upload file in chunks" begin
     upload_channel, metadata_channel =
@@ -147,9 +147,23 @@ end
     @test String(content) == "Hello, World!\n"
 end
 
+# @testset "Upload empty file in chunks" begin
+#     content = map(Vector{UInt8}, String[])
+#     metadata = files_upload(auth, "/$folder/file2", ContentIterator(content))
+#     @test metadata isa FileMetadata
+#     @test metadata.size == 0
+#     entries = files_list_folder(auth, "/$folder", recursive=true)
+#     @test count(entry -> startswith(entry.path_display, "/$folder"),
+#                 entries) == 5
+#     @test count(entry -> entry.path_display == "/$folder", entries) == 1
+#     @test count(entry -> entry.path_display == "/$folder/file2", entries) == 1
+# end
+
 @testset "Upload empty file in chunks" begin
-    content = map(Vector{UInt8}, String[])
-    metadata = files_upload(auth, "/$folder/file2", ContentIterator(content))
+    upload_channel, metadata_channel =
+        files_upload_start(auth, "/$folder/file2")
+    close(upload_channel)
+    metadata = take!(metadata_channel)
     @test metadata isa FileMetadata
     @test metadata.size == 0
     entries = files_list_folder(auth, "/$folder", recursive=true)
@@ -166,25 +180,25 @@ end
 end
 
 const numfiles = 4
-@testset "Upload several files" begin
-    chunk = Vector{UInt8}("Hello, World!\n")
-    contents = StatefulIterator{Tuple{String, ContentIterator}}(
-        ("/$folder/files$i", ContentIterator(Iterators.repeated(chunk, i)))
-        for i in 0:numfiles-1)
-    metadatas = files_upload(auth, contents)
-    @test length(metadatas) == numfiles
-    @test all(metadata isa FileMetadata for metadata in metadatas)
-    @test all(metadata.size == (i-1) * length("Hello, World!\n")
-              for (i,metadata) in enumerate(metadatas))
-    entries = files_list_folder(auth, "/$folder", recursive=true)
-    @test count(entry -> startswith(entry.path_display, "/$folder"),
-                entries) == numfiles + 5
-    @test count(entry -> entry.path_display == "/$folder", entries) == 1
-    for i in 0:numfiles-1
-        @test count(entry -> entry.path_display == "/$folder/files$i",
-                    entries) == 1
-    end
-end
+# @testset "Upload several files" begin
+#     chunk = Vector{UInt8}("Hello, World!\n")
+#     contents = StatefulIterator{Tuple{String, ContentIterator}}(
+#         ("/$folder/files$i", ContentIterator(Iterators.repeated(chunk, i)))
+#         for i in 0:numfiles-1)
+#     metadatas = files_upload(auth, contents)
+#     @test length(metadatas) == numfiles
+#     @test all(metadata isa FileMetadata for metadata in metadatas)
+#     @test all(metadata.size == (i-1) * length("Hello, World!\n")
+#               for (i,metadata) in enumerate(metadatas))
+#     entries = files_list_folder(auth, "/$folder", recursive=true)
+#     @test count(entry -> startswith(entry.path_display, "/$folder"),
+#                 entries) == numfiles + 5
+#     @test count(entry -> entry.path_display == "/$folder", entries) == 1
+#     for i in 0:numfiles-1
+#         @test count(entry -> entry.path_display == "/$folder/files$i",
+#                     entries) == 1
+#     end
+# end
 
 @testset "Upload several files" begin
     upload_spec_channel, metadatas_channel = files_upload_start(auth)
@@ -221,11 +235,21 @@ end
     end
 end
 
+# @testset "Upload zero files" begin
+#     contents = StatefulIterator{Tuple{String, ContentIterator}}(
+#         Tuple{String, ContentIterator}[]
+#     )
+#     metadatas = files_upload(auth, contents)
+#     @test isempty(metadatas)
+#     entries = files_list_folder(auth, "/$folder", recursive=true)
+#     @test count(entry -> startswith(entry.path_display, "/$folder"),
+#                 entries) == numfiles + 5
+# end
+
 @testset "Upload zero files" begin
-    contents = StatefulIterator{Tuple{String, ContentIterator}}(
-        Tuple{String, ContentIterator}[]
-    )
-    metadatas = files_upload(auth, contents)
+    upload_spec_channel, metadatas_channel = files_upload_start(auth)
+    close(upload_spec_channel)
+    metadatas = take!(metadatas_channel)
     @test isempty(metadatas)
     entries = files_list_folder(auth, "/$folder", recursive=true)
     @test count(entry -> startswith(entry.path_display, "/$folder"),

@@ -708,8 +708,16 @@ function cmd_put(args)
         end
     end
 
-    uploads = Tuple{String, String}[]
+    # Use batches of at most 1000 files, and which upload in at most n
+    # seconds
+    max_files = 100             #TODO 1000
+    max_seconds = 60.0
+    upload_spec_channel, metadatas_channel = files_upload_start(auth)
+    num_files = 0
+    start_time = time()
+
     n = length(want_uploads)
+    # TODO: upload several files in parallel
     for (i, (filename, source)) in enumerate(want_uploads)
         println("Info: Comparing content hash ($i/$n):",
                 " $(quote_string(source))")
@@ -743,67 +751,48 @@ function cmd_put(args)
 
         # TODO: touch Dropbox file if upload is skipped?
         if need_upload
-            # if content === nothing
-            #     content = read(source)
-            # end
-            # metadata = files_upload(auth, filename, content)
-
-            # Upload all files simultaneously
-            # TODO: don't read files twice; instead, check content
-            # hash dynamically when the file is about to be uploaded.
-            # probably most elegant to use Julia's multi-tasking (not
-            # multi-threading) for this, i.e. to use a Channel instead
-            # of iterators.
-            push!(uploads, (filename, source))
-        end
-    end
-
-    # Create upload iterator for a single file
-    function make_upload_iter(i, n, upload::Tuple{String, String}
-                              )::Tuple{String, ContentIterator}
-        dst, src = upload
-        print("Info: Uploading ($i/$n): $(quote_string(src))")
-        flush(stdout)
-        # Read in chunks of 150 MByte
-        chunksize = 150 * 1024 * 1024
-        # TODO: Read only on demand
-        chunks = Vector{UInt8}[]
-        bytes_read = Int64(0)
-        open(src, "r") do io
-            while !eof(io)
-                chunk = read(io, chunksize)
-                bytes_read += length(chunk)
-                if !isempty(chunk)
-                    push!(chunks, chunk)
+            # TODO: can we upload chunks in parallel?
+            data_channel = Channel{Vector{UInt8}}(0)
+            put!(upload_spec_channel, UploadSpec(data_channel, filename))
+            print("Info: Uploading ($i/$n): $(quote_string(source))")
+            flush(stdout)
+            # Read in chunks of 150 MByte
+            chunksize = 150 * 1024 * 1024
+            bytes_read = Int64(0)
+            open(source, "r") do io
+                while !eof(io)
+                    chunk = read(io, chunksize)
                     print("\rInfo: Uploading ($i/$n):",
-                          " $(quote_string(src)) ($bytes_read bytes...)")
+                          " $(quote_string(source)) ($bytes_read bytes...)")
                     flush(stdout)
+                    if !isempty(chunk)
+                        put!(data_channel, chunk)
+                    end
                 end
             end
+            print("\rInfo: Uploading ($i/$n):",
+                  " $(quote_string(source)) ($bytes_read bytes)   ")
+            println("\r")
+            flush(stdout)
+            close(data_channel)
         end
-        print("\rInfo: Uploading ($i/$n):",
-              " $(quote_string(src)) ($bytes_read bytes)   ")
-        println("\r")
-        flush(stdout)
-        # TODO: read on demand; free data when done
-        dst, ContentIterator(chunks)
+
+        num_files += 1
+        if num_files >= max_files || time() - start_time >= max_seconds
+            println("Info: Flushing upload")
+            close(upload_spec_channel)
+            metadatas = take!(metadatas_channel)
+            upload_spec_channel, metadatas_channel = files_upload_start(auth)
+            num_files = 0
+            start_time = time()
+        end
+
     end
 
-    # Create upload iterator for several files
-    function make_uploads_iter(uploads::AbstractVector{Tuple{String, String}}
-                               )::StatefulIterator{Tuple{String,
-                                                         ContentIterator}}
-        n = length(uploads)
-        StatefulIterator{Tuple{String, ContentIterator}}(
-            make_upload_iter(i, n, upload)
-            for (i, upload) in enumerate(uploads))
-    end
-
-    len = length(uploads)
-    batchsize = 10              #TODO 1000
-    for offset in 1:batchsize:len
-        batch = @view uploads[offset : min(len, offset+batchsize-1)]
-        files_upload(auth, make_uploads_iter(batch))
+    if num_files > 0
+        println("Info: Finishing upload")
+        close(upload_spec_channel)
+        metadatas = take!(metadatas_channel)
     end
 
     return exit_code

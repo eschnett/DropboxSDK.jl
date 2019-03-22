@@ -301,7 +301,7 @@ channel is closed.
 function calc_content_hash_start()::Tuple{Channel{AbstractVector{UInt8}},
                                           Channel{String}}
     content_hash_channel = Channel{String}(0)
-    function calc_content_hash(data_channel::Channel{AbstractVector{UInt8}})
+    function task(data_channel::Channel{AbstractVector{UInt8}})
         chunksize = 4 * 1024 * 1024
         chunksums = UInt8[]
         # TODO: Don't buffer the data; instead, use SHA256_CTX to
@@ -325,7 +325,7 @@ function calc_content_hash_start()::Tuple{Channel{AbstractVector{UInt8}},
         put!(content_hash_channel, bytes2hex(sha256(chunksums)))
         close(content_hash_channel)
     end
-    data_channel = Channel(calc_content_hash, ctype=AbstractVector{UInt8})
+    data_channel = Channel(task, ctype=AbstractVector{UInt8})
     data_channel, content_hash_channel
 end
 
@@ -516,113 +516,113 @@ end
 
 
 
-export StatefulIterator
-"""
-    struct StatefulIterator{T}
-
-A stateful iterator that returns values of type `T`.
-"""
-struct StatefulIterator{T}
-    iterator::Iterators.Stateful{C, Union{Nothing, Tuple{T, S}}} where {C, S}
-    function StatefulIterator{T}(coll) where {T}
-        return new{T}(Iterators.Stateful(coll))
-    end
-end
-
-export ContentIterator
-"""
-    struct ContentIterator{T}
-
-A stateful iterator that returns values of type `Vector{UInt}`.
-"""
-const ContentIterator = StatefulIterator{Vector{UInt8}}
-
-"""
-    files_upload(auth::Authorization,
-                 path::String,
-                 content::ContentIterator
-                )::Union{Error, FileMetadata}
-
-Upload a file `path`, returning its metadata. The file contents are
-passed via an iterator `content` that returns chunks of data. Each
-chunk needs to be of type `Vector{UInt8}`, and should be no larger
-than 150 MByte.
-
-This function should only be used if only a few files are uploaded.
-Other `files_upload` functions are more efficientif there are many
-files to be uploaded.
-"""
-function files_upload(auth::Authorization,
-                      path::String,
-                      content::ContentIterator)::FileMetadata
-    session_id = nothing
-    offset = Int64(0)
-    data_channel, content_hash_channel = calc_content_hash_start()
-    while !isempty(content.iterator)
-        chunk = popfirst!(content.iterator)::Vector{UInt8}
-        isempty(chunk) && continue
-        if session_id === nothing
-            args = Dict(
-                "close" => false,
-            )
-            res = post_content_upload(auth, "files/upload_session/start",
-                                      args, chunk)
-            session_id = res["session_id"]
-        else
-            args = Dict(
-                "cursor" => Dict(
-                    "session_id" => session_id,
-                    "offset" => offset,
-                ),
-                "close" => false,
-            )
-            res = post_content_upload(auth, "files/upload_session/append_v2",
-                                      args, chunk)
-        end
-        offset = offset + length(chunk)
-        put!(data_channel, chunk)
-    end
-    if session_id === nothing
-        # The file was empty
-        @assert offset == 0
-        metadata = files_upload(auth, path, UInt8[])
-    else
-        # Note: We don't need to close the session
-        args = Dict(
-            "cursor" => Dict(
-                "session_id" => session_id,
-                "offset" => offset,
-            ),
-            "commit" => Dict(
-                "path" => path,
-                "mode" => add,
-                "autorename" => false,
-                # "client_modified"
-                "mute" => false,
-                # "property_groups"
-                "strict_conflict" => false,
-            ),
-        )
-        res = post_content_upload(auth, "files/upload_session/finish",
-                                  args, UInt8[])
-        metadata = FileMetadata(res)
-    end
-
-    # Check content hash
-    close(data_channel)
-    content_hash = take!(content_hash_channel)
-    if metadata.content_hash != content_hash
-        throw(DropboxError(
-            Dict("error" => "LocalContentHashMismatch",
-                 "error_summary" => "local/content_hashes_do_not_match",
-                 "path" => path,
-                 "content_hash" => metadata.content_hash,
-                 "local_content_hash" => content_hash,
-                 )))
-    end
-
-    return metadata
-end
+# export StatefulIterator
+# """
+#     struct StatefulIterator{T}
+# 
+# A stateful iterator that returns values of type `T`.
+# """
+# struct StatefulIterator{T}
+#     iterator::Iterators.Stateful{C, Union{Nothing, Tuple{T, S}}} where {C, S}
+#     function StatefulIterator{T}(coll) where {T}
+#         return new{T}(Iterators.Stateful(coll))
+#     end
+# end
+# 
+# export ContentIterator
+# """
+#     struct ContentIterator{T}
+# 
+# A stateful iterator that returns values of type `Vector{UInt}`.
+# """
+# const ContentIterator = StatefulIterator{Vector{UInt8}}
+#
+# """
+#     files_upload(auth::Authorization,
+#                  path::String,
+#                  content::ContentIterator
+#                 )::Union{Error, FileMetadata}
+# 
+# Upload a file `path`, returning its metadata. The file contents are
+# passed via an iterator `content` that returns chunks of data. Each
+# chunk needs to be of type `Vector{UInt8}`, and should be no larger
+# than 150 MByte.
+# 
+# This function should only be used if only a few files are uploaded.
+# Other `files_upload` functions are more efficientif there are many
+# files to be uploaded.
+# """
+# function files_upload(auth::Authorization,
+#                       path::String,
+#                       content::ContentIterator)::FileMetadata
+#     session_id = nothing
+#     offset = Int64(0)
+#     data_channel, content_hash_channel = calc_content_hash_start()
+#     while !isempty(content.iterator)
+#         chunk = popfirst!(content.iterator)::Vector{UInt8}
+#         isempty(chunk) && continue
+#         if session_id === nothing
+#             args = Dict(
+#                 "close" => false,
+#             )
+#             res = post_content_upload(auth, "files/upload_session/start",
+#                                       args, chunk)
+#             session_id = res["session_id"]
+#         else
+#             args = Dict(
+#                 "cursor" => Dict(
+#                     "session_id" => session_id,
+#                     "offset" => offset,
+#                 ),
+#                 "close" => false,
+#             )
+#             res = post_content_upload(auth, "files/upload_session/append_v2",
+#                                       args, chunk)
+#         end
+#         offset = offset + length(chunk)
+#         put!(data_channel, chunk)
+#     end
+#     if session_id === nothing
+#         # The file was empty
+#         @assert offset == 0
+#         metadata = files_upload(auth, path, UInt8[])
+#     else
+#         # Note: We don't need to close the session
+#         args = Dict(
+#             "cursor" => Dict(
+#                 "session_id" => session_id,
+#                 "offset" => offset,
+#             ),
+#             "commit" => Dict(
+#                 "path" => path,
+#                 "mode" => add,
+#                 "autorename" => false,
+#                 # "client_modified"
+#                 "mute" => false,
+#                 # "property_groups"
+#                 "strict_conflict" => false,
+#             ),
+#         )
+#         res = post_content_upload(auth, "files/upload_session/finish",
+#                                   args, UInt8[])
+#         metadata = FileMetadata(res)
+#     end
+# 
+#     # Check content hash
+#     close(data_channel)
+#     content_hash = take!(content_hash_channel)
+#     if metadata.content_hash != content_hash
+#         throw(DropboxError(
+#             Dict("error" => "LocalContentHashMismatch",
+#                  "error_summary" => "local/content_hashes_do_not_match",
+#                  "path" => path,
+#                  "content_hash" => metadata.content_hash,
+#                  "local_content_hash" => content_hash,
+#                  )))
+#     end
+# 
+#     return metadata
+# end
 
 
 
@@ -647,7 +647,7 @@ function files_upload_start(auth::Authorization,
                             )::Tuple{Channel{Vector{UInt8}},
                                      Channel{FileMetadata}}
     metadata_channel = Channel{FileMetadata}(0)
-    function files_upload(data_channel::Channel{Vector{UInt8}})
+    function task(upload_channel::Channel{Vector{UInt8}})
         session_id = nothing
         offset = Int64(0)
         data_channel, content_hash_channel = calc_content_hash_start()
@@ -717,7 +717,7 @@ function files_upload_start(auth::Authorization,
         put!(metadata_channel, metadata)
         close(metadata_channel)
     end
-    upload_channel = Channel(files_upload, ctype=Vector{UInt8})
+    upload_channel = Channel(task, ctype=Vector{UInt8})
     upload_channel, metadata_channel
 end
 
@@ -731,197 +731,197 @@ mutable struct UploadState
     metadata::Union{Nothing, FileMetadata}
 end
 
-"""
-    files_upload(auth::Authorization,
-                 contents::StatefulIterator{Tuple{String, ContentIterator}}
-                )::Union{Error, Vector{Union{Error, FileMetadata}}}
-
-Upload several files simultaneously in an efficient manner. The list
-of files is passed via an iterator `contents`. Each file is specifiedy
-by a path (as `String`) and its content (as `ContentIterator`). Each
-chunk needs to be of type `Vector{UInt8}`, and should be no larger
-than 150 MByte. No more than 1000 files should be uploaded
-simultaneously (TODO: avoid this limitation.)
-
-This function is efficient if many or larger files are uploaded.
-"""
-function files_upload(auth::Authorization,
-                      contents::StatefulIterator{Tuple{String, ContentIterator}}
-                      )::Vector{FileMetadata}
-    upload_states = UploadState[]
-    # TODO: can handle only 1000 files at once
-    # TODO: parallelize loop
-    for (path, content) in contents.iterator
-
-        session_id = nothing
-        offset = Int64(0)
-        data_channel, content_hash_channel = calc_content_hash_start()
-        while !isempty(content.iterator)
-            chunk = popfirst!(content.iterator)::Vector{UInt8}
-            isempty(chunk) && continue
-            if session_id === nothing
-                args = Dict(
-                    "close" => false,
-                )
-                res = post_content_upload(auth, "files/upload_session/start",
-                                          args, chunk)
-                session_id = res["session_id"]
-            else
-                args = Dict(
-                    "cursor" => Dict(
-                        "session_id" => session_id,
-                        "offset" => offset,
-                    ),
-                    "close" => false,
-                )
-                res = post_content_upload(auth,
-                                          "files/upload_session/append_v2",
-                                          args, chunk)
-            end
-            offset = offset + length(chunk)
-            put!(data_channel, chunk)
-        end
-        # TODO: We need to close only the last session. But what does
-        # "last" mean? Is it "last session id passed to
-        # files/finish_upload_batch", or the last session to finish
-        # uploading?
-        if session_id === nothing
-            # The file is empty
-            @assert offset == 0
-            args = Dict(
-                "close" => true,
-            )
-            res = post_content_upload(auth, "files/upload_session/start",
-                                      args, UInt8[])
-            session_id = res["session_id"]
-        else
-            args = Dict(
-                "cursor" => Dict(
-                    "session_id" => session_id,
-                    "offset" => offset,
-                ),
-                "close" => true,
-            )
-            res = post_content_upload(auth, "files/upload_session/append_v2",
-                                      args, UInt8[])
-        end
-
-        close(data_channel)
-        content_hash = take!(content_hash_channel)
-        push!(upload_states,
-              UploadState(path, session_id, offset, content_hash, nothing))
-    end
-
-    if isempty(upload_states)
-        # We uploaded zero files
-        return FileMetadata[]
-    end
-
-    # We might need to retry several times
-    while true
-
-        missing_uploads = Int[]
-        for (i, upload_state) in enumerate(upload_states)
-            if upload_state.metadata isa Nothing
-                push!(missing_uploads, i)
-            end
-        end
-        @assert !isempty(missing_uploads)
-
-        entries = []
-        for i in missing_uploads
-            upload_state = upload_states[i]
-            @assert upload_state.metadata isa Nothing
-            args = Dict(
-                "cursor" => Dict(
-                    "session_id" => upload_state.session_id,
-                    "offset" => upload_state.offset,
-                ),
-                "commit" => Dict(
-                    "path" => upload_state.path,
-                    "mode" => add,
-                    "autorename" => false,
-                    # "client_modified"
-                    "mute" => false,
-                    # "property_groups"
-                    "strict_conflict" => false,
-                ),
-            )
-            push!(entries, args)
-        end
-        args = Dict(
-            "entries" => entries,
-        )
-        res = post_rpc(auth, "files/upload_session/finish_batch", args)
-        is_complete = res[".tag"] == "complete"
-
-        # Wait for completion
-        if !is_complete
-            async_job_id = res["async_job_id"]
-
-            delay = 1.0         # seconds
-            while !is_complete
-                sleep(delay)
-                delay = min(60.0, 2.0 * delay) # exponential back-off
-
-                args = Dict(
-                    "async_job_id" => async_job_id,
-                )
-                res = post_rpc(auth, "files/upload_session/finish_batch/check",
-                               args)
-                is_complete = res[".tag"] == "complete"
-            end
-        end
-        entries = res["entries"]
-
-        @assert length(entries) == length(missing_uploads)
-        for (i, entry) in zip(missing_uploads, entries)
-            if entry[".tag"] == "success" 
-                # The tag is "success", but the type is actually
-                # "FileMetadata". This is strange, and also doesn't
-                # agree with the documentation.
-                success = entry
-                upload_state = upload_states[i]
-                @assert upload_state.metadata isa Nothing
-
-                metadata = FileMetadata(success)
-                if metadata.content_hash != upload_state.content_hash
-                    throw(DropboxError(
-                        Dict("error" => "LocalContentHashMismatch",
-                             "error_summary" =>
-                             "local/content_hashes_do_not_match",
-                             "path" => upload_state.path,
-                             "content_hash" => metadata.content_hash,
-                             "local_content_hash" => upload_state.content_hash,
-                             )))
-                end
-                upload_state.metadata = metadata
-            else
-                @assert entry[".tag"] == "failure"
-                failure = entry["failure"]
-                if failure[".tag"] == "too_many_write_operations"
-                    # we will retry this entry
-                else
-                    throw(DropboxError(failure))
-                end
-            end
-        end
-
-        if any(upload_state.metadata isa Nothing
-               for upload_state in upload_states)
-            println("Info: Error \"too_many_write_operations\"")
-            println("Info: Waiting for 1 seconds...")
-            sleep(1)
-            println("Info: Retrying...")
-            continue
-        end
-
-        metadatas = FileMetadata[upload_state.metadata
-                                 for upload_state in upload_states]
-        return metadatas
-
-    end
-end
+# """
+#     files_upload(auth::Authorization,
+#                  contents::StatefulIterator{Tuple{String, ContentIterator}}
+#                 )::Union{Error, Vector{Union{Error, FileMetadata}}}
+# 
+# Upload several files simultaneously in an efficient manner. The list
+# of files is passed via an iterator `contents`. Each file is specifiedy
+# by a path (as `String`) and its content (as `ContentIterator`). Each
+# chunk needs to be of type `Vector{UInt8}`, and should be no larger
+# than 150 MByte. No more than 1000 files should be uploaded
+# simultaneously (TODO: avoid this limitation.)
+# 
+# This function is efficient if many or larger files are uploaded.
+# """
+# function files_upload(auth::Authorization,
+#                       contents::StatefulIterator{Tuple{String, ContentIterator}}
+#                       )::Vector{FileMetadata}
+#     upload_states = UploadState[]
+#     # TODO: can handle only 1000 files at once
+#     # TODO: parallelize loop
+#     for (path, content) in contents.iterator
+# 
+#         session_id = nothing
+#         offset = Int64(0)
+#         data_channel, content_hash_channel = calc_content_hash_start()
+#         while !isempty(content.iterator)
+#             chunk = popfirst!(content.iterator)::Vector{UInt8}
+#             isempty(chunk) && continue
+#             if session_id === nothing
+#                 args = Dict(
+#                     "close" => false,
+#                 )
+#                 res = post_content_upload(auth, "files/upload_session/start",
+#                                           args, chunk)
+#                 session_id = res["session_id"]
+#             else
+#                 args = Dict(
+#                     "cursor" => Dict(
+#                         "session_id" => session_id,
+#                         "offset" => offset,
+#                     ),
+#                     "close" => false,
+#                 )
+#                 res = post_content_upload(auth,
+#                                           "files/upload_session/append_v2",
+#                                           args, chunk)
+#             end
+#             offset = offset + length(chunk)
+#             put!(data_channel, chunk)
+#         end
+#         # TODO: We need to close only the last session. But what does
+#         # "last" mean? Is it "last session id passed to
+#         # files/finish_upload_batch", or the last session to finish
+#         # uploading?
+#         if session_id === nothing
+#             # The file is empty
+#             @assert offset == 0
+#             args = Dict(
+#                 "close" => true,
+#             )
+#             res = post_content_upload(auth, "files/upload_session/start",
+#                                       args, UInt8[])
+#             session_id = res["session_id"]
+#         else
+#             args = Dict(
+#                 "cursor" => Dict(
+#                     "session_id" => session_id,
+#                     "offset" => offset,
+#                 ),
+#                 "close" => true,
+#             )
+#             res = post_content_upload(auth, "files/upload_session/append_v2",
+#                                       args, UInt8[])
+#         end
+# 
+#         close(data_channel)
+#         content_hash = take!(content_hash_channel)
+#         push!(upload_states,
+#               UploadState(path, session_id, offset, content_hash, nothing))
+#     end
+# 
+#     if isempty(upload_states)
+#         # We uploaded zero files
+#         return FileMetadata[]
+#     end
+# 
+#     # We might need to retry several times
+#     while true
+# 
+#         missing_uploads = Int[]
+#         for (i, upload_state) in enumerate(upload_states)
+#             if upload_state.metadata isa Nothing
+#                 push!(missing_uploads, i)
+#             end
+#         end
+#         @assert !isempty(missing_uploads)
+# 
+#         entries = []
+#         for i in missing_uploads
+#             upload_state = upload_states[i]
+#             @assert upload_state.metadata isa Nothing
+#             args = Dict(
+#                 "cursor" => Dict(
+#                     "session_id" => upload_state.session_id,
+#                     "offset" => upload_state.offset,
+#                 ),
+#                 "commit" => Dict(
+#                     "path" => upload_state.path,
+#                     "mode" => add,
+#                     "autorename" => false,
+#                     # "client_modified"
+#                     "mute" => false,
+#                     # "property_groups"
+#                     "strict_conflict" => false,
+#                 ),
+#             )
+#             push!(entries, args)
+#         end
+#         args = Dict(
+#             "entries" => entries,
+#         )
+#         res = post_rpc(auth, "files/upload_session/finish_batch", args)
+#         is_complete = res[".tag"] == "complete"
+# 
+#         # Wait for completion
+#         if !is_complete
+#             async_job_id = res["async_job_id"]
+# 
+#             delay = 1.0         # seconds
+#             while !is_complete
+#                 sleep(delay)
+#                 delay = min(60.0, 2.0 * delay) # exponential back-off
+# 
+#                 args = Dict(
+#                     "async_job_id" => async_job_id,
+#                 )
+#                 res = post_rpc(auth, "files/upload_session/finish_batch/check",
+#                                args)
+#                 is_complete = res[".tag"] == "complete"
+#             end
+#         end
+#         entries = res["entries"]
+# 
+#         @assert length(entries) == length(missing_uploads)
+#         for (i, entry) in zip(missing_uploads, entries)
+#             if entry[".tag"] == "success" 
+#                 # The tag is "success", but the type is actually
+#                 # "FileMetadata". This is strange, and also doesn't
+#                 # agree with the documentation.
+#                 success = entry
+#                 upload_state = upload_states[i]
+#                 @assert upload_state.metadata isa Nothing
+# 
+#                 metadata = FileMetadata(success)
+#                 if metadata.content_hash != upload_state.content_hash
+#                     throw(DropboxError(
+#                         Dict("error" => "LocalContentHashMismatch",
+#                              "error_summary" =>
+#                              "local/content_hashes_do_not_match",
+#                              "path" => upload_state.path,
+#                              "content_hash" => metadata.content_hash,
+#                              "local_content_hash" => upload_state.content_hash,
+#                              )))
+#                 end
+#                 upload_state.metadata = metadata
+#             else
+#                 @assert entry[".tag"] == "failure"
+#                 failure = entry["failure"]
+#                 if failure[".tag"] == "too_many_write_operations"
+#                     # we will retry this entry
+#                 else
+#                     throw(DropboxError(failure))
+#                 end
+#             end
+#         end
+# 
+#         if any(upload_state.metadata isa Nothing
+#                for upload_state in upload_states)
+#             println("Info: Error \"too_many_write_operations\"")
+#             println("Info: Waiting for 1 seconds...")
+#             sleep(1)
+#             println("Info: Retrying...")
+#             continue
+#         end
+# 
+#         metadatas = FileMetadata[upload_state.metadata
+#                                  for upload_state in upload_states]
+#         return metadatas
+# 
+#     end
+# end
 
 
 
@@ -950,7 +950,7 @@ function files_upload_start(auth::Authorization
                                      Channel{Vector{FileMetadata}}}
     metadatas_channel = Channel{Vector{FileMetadata}}(0)
 
-    function files_upload(upload_spec_channel::Channel{UploadSpec})
+    function task(upload_spec_channel::Channel{UploadSpec})
         upload_states = UploadState[]
         # TODO: can handle only 1000 files at once
         # TODO: parallelize loop
@@ -1005,7 +1005,8 @@ function files_upload_start(auth::Authorization
                     ),
                     "close" => true,
                 )
-                res = post_content_upload(auth, "files/upload_session/append_v2",
+                res = post_content_upload(auth,
+                                          "files/upload_session/append_v2",
                                           args, UInt8[])
             end
 
@@ -1128,11 +1129,12 @@ function files_upload_start(auth::Authorization
                                      for upload_state in upload_states]
             put!(metadatas_channel, metadatas)
             close(metadatas_channel)
+            return
 
         end
     end
 
-    upload_spec_channel = Channel(files_upload, ctype=UploadSpec)
+    upload_spec_channel = Channel(task, ctype=UploadSpec)
     upload_spec_channel, metadatas_channel
 end
 
