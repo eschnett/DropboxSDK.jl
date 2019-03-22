@@ -5,8 +5,8 @@ end
 
 
 function runcmd(args::Cmd; wrap=identity)::Vector{String}
-    julia = Base.julia_cmd()
-    dbftp = joinpath("..", "bin", "dbftp.jl")
+    # julia = Base.julia_cmd()
+    dbftp = joinpath("..", "bin", "dbftp")
     lines = String[]
     open(wrap(`$julia $dbftp $args`)) do io
         skipcount = 0
@@ -72,7 +72,6 @@ end
         content = Vector{UInt8}("Hello, World!\n")
         write(filename, content)
         lines = runcmd(`put $filename $folder`)
-        @show lines
         @test length(lines) == 0
 
         lines = runcmd(`put $filename $folder/hello`)
