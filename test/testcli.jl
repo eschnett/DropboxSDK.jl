@@ -5,7 +5,7 @@ end
 
 
 function runcmd(args::Cmd; wrap=identity)::Vector{String}
-    # julia = Base.julia_cmd()
+    julia = Base.julia_cmd()
     dbftp = joinpath("..", "bin", "dbftp")
     lines = String[]
     open(wrap(`$julia $dbftp $args`)) do io
