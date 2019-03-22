@@ -723,10 +723,11 @@ function cmd_put(args)
             open(source, "r") do io
                 while !eof(io)
                     chunk = read(io, chunksize)
-                    print("\rInfo: Uploading ($i/$n):",
-                          " $(quote_string(source)) ($bytes_read bytes...)")
-                    flush(stdout)
                     if !isempty(chunk)
+                        bytes_read += length(chunk)
+                        print("\rInfo: Uploading ($i/$n):",
+                              " $(quote_string(source)) ($bytes_read bytes...)")
+                        flush(stdout)
                         put!(data_channel, chunk)
                     end
                 end
