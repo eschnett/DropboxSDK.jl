@@ -66,7 +66,7 @@ The command line client works similar to `sftp`. (There is no REPL
 yet.) These commands are implemented:
 
 - `account`: Display account information
-- `cmp`: Compare files (compare content hashes)
+- `cmp`: Compare local and remote files (compare content hashes)
 - `du`: Display space usage
 - `get`: Download files
 - `help`: Get help
@@ -92,22 +92,23 @@ using DropboxSDK
 These API functions are currently supported; see their respective
 documentation:
 
-- `files_create_folder`
-- `files_delete`
-- `files_download`
-- `files_get_metadata`
-- `files_list_folder`
-- `files_upload`
-- `users_get_current_account`
-- `users_get_space_usage`
+- `files_create_folder`: Create a directory
+- `files_delete`: Delete a file or directory (recursively)
+- `files_download`: Get a file
+- `files_get_metadata`: Get metadata (size etc.) for a file or directory
+- `files_list_folder`: List directory content
+- `files_upload`: Upload one file
+- `files_upload_start`: Efficiently upload one large file in chunks,
+  or upload several files simultaneously
+- `users_get_current_account`: Get information about the current account
+- `users_get_space_usage`: Get used and available space
 
 There are also a few local helper functions:
 
-- `calc_content_hash_add!`
-- `calc_content_hash_get`
-- `calc_content_hash_init`
-- `calc_content_hash`
-- `get_authorization`
+- `calc_content_hash`: Calculate content hash (fingerprint) of a local file
+- `calc_content_hash_start`: Efficiently calculate content hash
+  (fingerprint) of a large local file
+- `get_authorization`: Read credentials from a configuration file
 
 The command line interface and the test cases also contain good
 pointers for how to use this API.

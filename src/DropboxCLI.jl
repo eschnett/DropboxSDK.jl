@@ -80,45 +80,6 @@ add_arg_table(
 
 
 
-# const escape_char = Dict{Char, Char}(
-#     ' ' => ' ',
-#     '"' => '"',
-#     '\'' => '\'',
-#     '\\' => '\\',
-#     '\a' => 'a',
-#     '\b' => 'b',
-#     '\e' => 'e',
-#     '\f' => 'f',
-#     '\n' => 'n',
-#     '\r' => 'r',
-#     '\t' => 't',
-#     '\v' => 'v',
-# )
-# 
-# function quote_string1(str::AbstractString)::String
-#     buf = IOBuffer()
-#     for c in str
-#         if isprint(c) && c != ' '
-#             print(buf, c)
-#         else
-#             ec = get(escape_char, c, '#')
-#             if ec != '#'
-#                 print(buf, '\\', escape_char[c])
-#             else
-#                 i = UInt(c)
-#                 if i <= 0xff
-#                     print(buf, "\\x", lpad(string(i), 2, '0'))
-#                 elseif i <= 0xffff
-#                     print(buf, "\\u", lpad(string(i), 4, '0'))
-#                 else
-#                     print(buf, "\\U", lpad(string(i), 8, '0'))
-#                 end
-#             end
-#         end
-#     end
-#     String(take!(buf))
-# end
-
 function quote_string(str::AbstractString)::AbstractString
     repr(str)[2:end-1]
 end
@@ -265,7 +226,7 @@ function cmd_cmp(args)
                     println("$(quote_string(source)): Content hash differs")
                     exit_code = 2
                 else
-                    # println("$(quote_string(source)): no difference")
+                    # no difference
                 end
             end
         end
@@ -446,7 +407,7 @@ const mode_strings = Dict{Type, String}(
 metadata_size(metadata) = Int64(0)
 metadata_size(metadata::FileMetadata) = metadata.size
 
-# e.g. "2019-03-15T23:05:18Z"))
+# e.g. "2019-03-15T23:05:18Z"
 metadata_modified(metadata) = "                    " # 20 spaces
 metadata_modified(metadata::FileMetadata) = metadata.server_modified
 
