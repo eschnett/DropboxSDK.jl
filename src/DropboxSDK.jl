@@ -38,6 +38,15 @@ end
 
 
 
+function takeifready!(ch::Channel{T})::Union{Nothing, T} where {T}
+    if !isready(ch)
+        return nothing
+    end
+    take!(ch)
+end
+
+
+
 include("types.jl")
 
 
@@ -670,8 +679,9 @@ function files_upload_start(auth::Authorization
         upload_states = UploadState[]
         # TODO: can handle only 1000 files at once
         # TODO: parallelize loop
-        for upload_spec in upload_spec_channel
 
+        function task1(upload_spec::UploadSpec,
+                       result_channel::Channel{Nothing})
             session_id = nothing
             offset = Int64(0)
             data_channel, content_hash_channel = calc_content_hash_start()
@@ -681,9 +691,9 @@ function files_upload_start(auth::Authorization
                     args = Dict(
                         "close" => false,
                     )
-                    res = post_content_upload(auth,
-                                              "files/upload_session/start",
-                                              args, chunk)
+                    res = post_content_upload(
+                        auth, "files/upload_session/start",
+                         args, chunk)
                     session_id = res["session_id"]
                 else
                     args = Dict(
@@ -693,25 +703,26 @@ function files_upload_start(auth::Authorization
                         ),
                         "close" => false,
                     )
-                    res = post_content_upload(auth,
-                                              "files/upload_session/append_v2",
-                                              args, chunk)
+                    res = post_content_upload(
+                        auth, "files/upload_session/append_v2",
+                        args, chunk)
                 end
                 offset = offset + length(chunk)
                 put!(data_channel, chunk)
             end
-            # TODO: We need to close only the last session. But what does
-            # "last" mean? Is it "last session id passed to
-            # files/finish_upload_batch", or the last session to finish
-            # uploading?
+            # TODO: We need to close only the last session. But what
+            # does "last" mean? Is it "last session id passed to
+            # files/finish_upload_batch", or the last session to
+            # finish uploading?
             if session_id === nothing
                 # The file is empty
                 @assert offset == 0
                 args = Dict(
                     "close" => true,
                 )
-                res = post_content_upload(auth, "files/upload_session/start",
-                                          args, UInt8[])
+                res = post_content_upload(
+                    auth, "files/upload_session/start",
+                    args, UInt8[])
                 session_id = res["session_id"]
             else
                 args = Dict(
@@ -721,9 +732,9 @@ function files_upload_start(auth::Authorization
                     ),
                     "close" => true,
                 )
-                res = post_content_upload(auth,
-                                          "files/upload_session/append_v2",
-                                          args, UInt8[])
+                res = post_content_upload(
+                    auth, "files/upload_session/append_v2",
+                    args, UInt8[])
             end
 
             close(data_channel)
@@ -731,6 +742,32 @@ function files_upload_start(auth::Authorization
             push!(upload_states,
                   UploadState(upload_spec.destination, session_id,
                               offset, content_hash, nothing))
+
+            put!(result_channel, nothing)
+            close(result_channel)
+        end
+
+        max_tasks = 4
+        tasks = Channel{Nothing}[]
+        for upload_spec in upload_spec_channel
+            while length(tasks) >= max_tasks
+                # todo: don't busy-wait
+                yield
+                oldtasks = tasks
+                tasks = Channel{Nothing}[]
+                for t in oldtasks
+                    if isready(t)
+                        take!(t)
+                    else
+                        push!(tasks, t)
+                    end
+                end
+            end
+            t = Channel(ch -> task1(upload_spec, ch), ctype=Nothing)
+            push!(tasks, t)
+        end
+        for t in tasks
+            take!(t)
         end
 
         if isempty(upload_states)

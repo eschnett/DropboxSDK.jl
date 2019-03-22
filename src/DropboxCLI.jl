@@ -486,8 +486,8 @@ function cmd_ls(args)
 
         # Output
         if long
-            max_size = maximum(metadata_size(metadata)
-                               for metadata in metadatas)
+            max_size =
+                maximum(metadata_size(metadata) for metadata in metadatas)
             size_digits = length(string(max_size))
             for metadata in metadatas
                 isdir = metadata isa FolderMetadata
@@ -672,7 +672,7 @@ function cmd_put(args)
     # Use batches of at most 1000 files, and which upload in at most n
     # seconds
     max_files = 100             #TODO 1000
-    max_seconds = 60.0
+    max_seconds = 60.0          #TODO longer?
     upload_spec_channel, metadatas_channel = files_upload_start(auth)
     num_files = 0
     start_time = time()
@@ -683,6 +683,8 @@ function cmd_put(args)
         println("Info: Comparing content hash ($i/$n):",
                 " $(quote_string(source))")
         # Compare content hash before uploading
+        # TODO: remember missing parent directories, and don't try to
+        # get a content hash from Dropox in that case
         need_upload = true
         content = nothing
         metadata = try
@@ -715,27 +717,24 @@ function cmd_put(args)
             # TODO: can we upload chunks in parallel?
             data_channel = Channel{Vector{UInt8}}(0)
             put!(upload_spec_channel, UploadSpec(data_channel, filename))
-            print("Info: Uploading ($i/$n): $(quote_string(source))")
-            flush(stdout)
             # Read in chunks of 150 MByte
             chunksize = 150 * 1024 * 1024
+            bytes_total = filesize(source)
             bytes_read = Int64(0)
             open(source, "r") do io
                 while !eof(io)
+                    pct = round(Int, 100.0 * bytes_read / bytes_total)
+                    print("\rInfo: Uploading ($i/$n):",
+                          " $(quote_string(source)) ($bytes_read bytes, $pct%)")
+                    flush(stdout)
                     chunk = read(io, chunksize)
-                    if !isempty(chunk)
-                        bytes_read += length(chunk)
-                        print("\rInfo: Uploading ($i/$n):",
-                              " $(quote_string(source)) ($bytes_read bytes...)")
-                        flush(stdout)
-                        put!(data_channel, chunk)
-                    end
+                    bytes_read += length(chunk)
+                    put!(data_channel, chunk)
                 end
             end
-            print("\rInfo: Uploading ($i/$n):",
-                  " $(quote_string(source)) ($bytes_read bytes)   ")
-            println("\r")
-            flush(stdout)
+            pct = round(Int, 100.0 * bytes_read / bytes_total)
+            println("\rInfo: Uploading ($i/$n):",
+                    " $(quote_string(source)) ($bytes_read bytes, $pct%)")
             close(data_channel)
         end
 

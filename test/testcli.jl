@@ -17,7 +17,7 @@ function runcmd(args::Cmd; wrap=identity)::Vector{String}
             elseif startswith(line, "Julia Dropbox client")
                 skipcount = 1
                 continue
-            elseif startswith(line, "Info: ")
+            elseif startswith(line, "Info: ") || startswith(line, "\rInfo: ")
                 continue
             else
                 push!(lines, line)
@@ -72,6 +72,7 @@ end
         content = Vector{UInt8}("Hello, World!\n")
         write(filename, content)
         lines = runcmd(`put $filename $folder`)
+        @show lines
         @test length(lines) == 0
 
         lines = runcmd(`put $filename $folder/hello`)
