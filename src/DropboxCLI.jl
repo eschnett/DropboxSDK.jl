@@ -683,43 +683,42 @@ function cmd_put(args)
     n = length(want_uploads)
     # TODO: upload several files in parallel
     for (i, (filename, source)) in enumerate(want_uploads)
-        println("Info: Comparing content hash ($i/$n):",
-                " $(quote_string(source))")
-        # Compare content hash before uploading
-        # TODO: remember missing parent directories, and don't try to
-        # get a content hash from Dropox in that case
-        need_upload = true
-        content = nothing
-        metadata = try
-            files_get_metadata(auth, filename)
-        catch ex
-            if ex isa DropboxError
-                nothing
-            else
-                rethrow(ex)
-            end
-        end
-        if metadata isa FileMetadata
-            size = filesize(source)
-            if metadata.size == size
-                # Don't upload if content hash matches
-                content = read(source)
-                content_hash = calc_content_hash(content)
-                if metadata.content_hash == content_hash
-                    println("Info: $(quote_string(source)):",
-                            " content hash matches; skipping upload")
-                    need_upload = false
+
+        function task(result_channel::Channel{Nothing})
+            println("Info: Comparing content hash ($i/$n):",
+                    " $(quote_string(source))")
+            # Compare content hash before uploading
+            # TODO: remember missing parent directories, and don't try
+            # to get a content hash from Dropox in that case
+            need_upload = true
+            content = nothing
+            metadata = try
+                files_get_metadata(auth, filename)
+            catch ex
+                if ex isa DropboxError
+                    nothing
+                else
+                    rethrow(ex)
                 end
-            elseif metadata.size < size
-                # TODO: Upload only missing fraction
             end
-        end
+            if metadata isa FileMetadata
+                size = filesize(source)
+                if metadata.size == size
+                    # Don't upload if content hash matches
+                    content = read(source)
+                    content_hash = calc_content_hash(content)
+                    if metadata.content_hash == content_hash
+                        println("Info: $(quote_string(source)):",
+                                " content hash matches; skipping upload")
+                        need_upload = false
+                    end
+                elseif metadata.size < size
+                    # TODO: Upload only missing fraction
+                end
+            end
 
-        # TODO: touch Dropbox file if upload is skipped?
-        if need_upload
-
-            function task(result_channel::Channel{Nothing})
-                # TODO: can we upload chunks in parallel?
+            # TODO: touch Dropbox file if upload is skipped?
+            if need_upload
                 data_channel = Channel{Vector{UInt8}}(0)
                 put!(upload_spec_channel, UploadSpec(data_channel, filename))
                 # Read in chunks of 150 MByte
@@ -742,24 +741,25 @@ function cmd_put(args)
                         " $(quote_string(source))",
                         " ($bytes_read bytes, $pct%)")
                 close(data_channel)
-                put!(result_channel, nothing)
-                close(result_channel)
             end
 
-            while length(tasks) >= max_tasks
-                yield
-                old_tasks = tasks
-                tasks = Channel{Nothing}[]
-                for t in old_tasks
-                    if isready(t)
-                        take!(t)
-                    else
-                        push!(tasks, t)
-                    end
+            put!(result_channel, nothing)
+            close(result_channel)
+        end
+
+        while length(tasks) >= max_tasks
+            yield
+            old_tasks = tasks
+            tasks = Channel{Nothing}[]
+            for t in old_tasks
+                if isready(t)
+                    take!(t)
+                else
+                    push!(tasks, t)
                 end
             end
-            push!(tasks, Channel(task, ctype=Nothing))
         end
+        push!(tasks, Channel(task, ctype=Nothing))
 
         num_files += 1
         if num_files >= max_files || time() - start_time >= max_seconds
