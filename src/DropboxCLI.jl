@@ -684,7 +684,7 @@ function cmd_put(args)
     # TODO: upload several files in parallel
     for (i, (filename, source)) in enumerate(want_uploads)
 
-        function task(result_channel::Channel{Nothing})
+        function task(i, filename, source, result_channel::Channel{Nothing})
             println("Info: Comparing content hash ($i/$n):",
                     " $(quote_string(source))")
             # Compare content hash before uploading
@@ -759,7 +759,8 @@ function cmd_put(args)
                 end
             end
         end
-        push!(tasks, Channel(task, ctype=Nothing))
+        push!(tasks,
+              Channel(ch -> task(i, filename, source, ch), ctype=Nothing))
 
         num_files += 1
         if num_files >= max_files || time() - start_time >= max_seconds
