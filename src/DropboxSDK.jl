@@ -747,24 +747,9 @@ function files_upload_start(auth::Authorization
             close(result_channel)
         end
 
-        max_tasks = 4
         tasks = Channel{Nothing}[]
         for upload_spec in upload_spec_channel
-            while length(tasks) >= max_tasks
-                # todo: don't busy-wait
-                yield
-                oldtasks = tasks
-                tasks = Channel{Nothing}[]
-                for t in oldtasks
-                    if isready(t)
-                        take!(t)
-                    else
-                        push!(tasks, t)
-                    end
-                end
-            end
-            t = Channel(ch -> task1(upload_spec, ch), ctype=Nothing)
-            push!(tasks, t)
+            push!(tasks, Channel(ch -> task1(upload_spec, ch), ctype=Nothing))
         end
         for t in tasks
             take!(t)

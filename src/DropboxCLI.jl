@@ -677,6 +677,9 @@ function cmd_put(args)
     num_files = 0
     start_time = time()
 
+    max_tasks = 4
+    tasks = Channel{Nothing}[]
+
     n = length(want_uploads)
     # TODO: upload several files in parallel
     for (i, (filename, source)) in enumerate(want_uploads)
@@ -714,44 +717,71 @@ function cmd_put(args)
 
         # TODO: touch Dropbox file if upload is skipped?
         if need_upload
-            # TODO: can we upload chunks in parallel?
-            data_channel = Channel{Vector{UInt8}}(0)
-            put!(upload_spec_channel, UploadSpec(data_channel, filename))
-            # Read in chunks of 150 MByte
-            chunksize = 150 * 1024 * 1024
-            bytes_total = filesize(source)
-            bytes_read = Int64(0)
-            open(source, "r") do io
-                while !eof(io)
-                    pct = round(Int, 100.0 * bytes_read / bytes_total)
-                    print("\rInfo: Uploading ($i/$n):",
-                          " $(quote_string(source)) ($bytes_read bytes, $pct%)")
-                    flush(stdout)
-                    chunk = read(io, chunksize)
-                    bytes_read += length(chunk)
-                    put!(data_channel, chunk)
+
+            function task(result_channel::Channel{Nothing})
+                # TODO: can we upload chunks in parallel?
+                data_channel = Channel{Vector{UInt8}}(0)
+                put!(upload_spec_channel, UploadSpec(data_channel, filename))
+                # Read in chunks of 150 MByte
+                chunksize = 150 * 1024 * 1024
+                bytes_total = filesize(source)
+                bytes_read = Int64(0)
+                open(source, "r") do io
+                    while !eof(io)
+                        pct = round(Int, 100.0 * bytes_read / bytes_total)
+                        println("Info: Uploading ($i/$n):",
+                                " $(quote_string(source))",
+                                " ($bytes_read bytes, $pct%)")
+                        chunk = read(io, chunksize)
+                        bytes_read += length(chunk)
+                        put!(data_channel, chunk)
+                    end
+                end
+                pct = round(Int, 100.0 * bytes_read / bytes_total)
+                println("Info: Uploading ($i/$n):",
+                        " $(quote_string(source))",
+                        " ($bytes_read bytes, $pct%)")
+                close(data_channel)
+                put!(result_channel, nothing)
+                close(result_channel)
+            end
+
+            while length(tasks) >= max_tasks
+                yield
+                old_tasks = tasks
+                tasks = Channel{Nothing}[]
+                for t in old_tasks
+                    if isready(t)
+                        take!(t)
+                    else
+                        push!(tasks, t)
+                    end
                 end
             end
-            pct = round(Int, 100.0 * bytes_read / bytes_total)
-            println("\rInfo: Uploading ($i/$n):",
-                    " $(quote_string(source)) ($bytes_read bytes, $pct%)")
-            close(data_channel)
+            push!(tasks, Channel(task, ctype=Nothing))
         end
 
         num_files += 1
         if num_files >= max_files || time() - start_time >= max_seconds
             println("Info: Flushing upload")
+            for t in tasks
+                take!(t)
+            end
             close(upload_spec_channel)
             metadatas = take!(metadatas_channel)
             upload_spec_channel, metadatas_channel = files_upload_start(auth)
             num_files = 0
             start_time = time()
+            tasks = Channel{Nothing}[]
         end
 
     end
 
     if num_files > 0
         println("Info: Finishing upload")
+        for t in tasks
+            take!(t)
+        end
         close(upload_spec_channel)
         metadatas = take!(metadatas_channel)
     end
