@@ -184,6 +184,10 @@ end
 
 Post a Content Upload request to the Dropbox API.
 """
+# TODO: Accept more content types (see documentation), not just
+# Vector{UInt8}
+# TODO: use canonicalize_headers = true
+# TODO: experiment with retry_non_idempotent = true
 function post_content_upload(auth::Authorization,
                              fun::String,
                              args::Union{Nothing, Dict},

@@ -746,8 +746,19 @@ function upload_one_file(auth::Authorization,
         size = filesize(source)
         if metadata.size == size
             # Don't upload if content hash matches
-            content = read(source)
-            content_hash = calc_content_hash(content)
+            # content = read(source)
+            # content_hash = calc_content_hash(content)
+            # Read in chunks of 150 MByte
+            data_channel, hash_channel = calc_content_hash_start()
+            open(source, "r") do io
+                while !eof(io)
+                    chunksize = 150 * 1024 * 1024
+                    chunk = read(io, chunksize)
+                    put!(data_channel, chunk)
+                end
+            end
+            close(data_channel)
+            content_hash = take!(hash_channel)
             if metadata.content_hash == content_hash
                 println("Info: $(quote_string(source)):",
                         " content hash matches; skipping upload")
