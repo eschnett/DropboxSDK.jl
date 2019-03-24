@@ -590,7 +590,7 @@ function cmd_put(args)
                     ispath_destination = false
                     isdir_destination = false
                 else
-                    println("$(quote_string(filename)):",
+                    println("$(quote_string(destination)):",
                             " $(ex.dict["error_summary"])")
                     return 1
                 end
@@ -600,9 +600,18 @@ function cmd_put(args)
         end
     end
 
-    want_uploads = Tuple{String, String}[]
-    for source in sources
+    # If the destination is not a directory, i.e. if it is a regular
+    # file, or if it does not exist, then there can be only a single
+    # source.
+    if !isdir_destination && length(sources) > 1
+        println("Destination \"$destination\" exists, but is not a directory")
+        return 1
+    end
 
+    result_channel = Channel{Nothing}(0)
+    upload_channel = Channel(ch -> upload_many_files(auth, ch, result_channel),
+                             ctype=Tuple{String, String}, csize=1000)
+    for source in sources
         # Distinguish between files and directories
         if !ispath(source)
             println("$source: File not found")
@@ -614,30 +623,11 @@ function cmd_put(args)
             # If the destination is a directory, the files will be
             # uploaded into that directory.
             filename = joinpath(destination, basename(source))
-        elseif length(sources) == 1 && !isdir_source
-            # If there is only a single source that is not a directory
-            if ispath_destination
-                # If the destination exists and is not a directory,
-                # then it is overwritten.
-                @assert !isdirpath(destination)
-                filename = destination
-            else
-                # If the destination does not exist, then a file with
-                # that name will be created.
-                filename = destination
-                pathname = dirname(filename)
-            end
         else
-            if ispath_destination && !isdir_destination
-                # Multiple sources: Destination exists, but is not a directory
-                println("Destination \"$destination\" exists,",
-                        " but is not a directory")
-                return 1
-            else
-                # Multiple sources: Destination does not exist
-                filename = destination
-                pathname = dirname(filename)
-            end
+            # If the destination is not a directory, then it specifies
+            # the destination file name (which may or may not exist)
+            @assert length(sources) == 1
+            filename = destination
         end
 
         # Add leading and remove trailing slashes
@@ -650,7 +640,7 @@ function cmd_put(args)
 
         if !isdir_source
             # The source is a regular file
-            push!(want_uploads, (filename, source))
+            put!(upload_channel, (source, filename))
         else
             # Both source and destination are directories
             function walk_upload_entry(source_prefix::String,
@@ -661,18 +651,28 @@ function cmd_put(args)
                     if isdir(source)
                         walk_upload_entry(source, filename)
                     else
-                        push!(want_uploads, (filename, source))
+                        put!(upload_channel, (source, filename))
                     end
                 end
             end
             walk_upload_entry(source, filename)
         end
     end
+    close(upload_channel)
 
+    take!(result_channel)
+
+    return exit_code
+end
+
+function upload_many_files(auth::Authorization,
+                           upload_channel::Channel{Tuple{String, String}},
+                           result_channel::Channel{Nothing})
     # Use batches of at most 1000 files, and which upload in at most n
     # seconds
     max_files = 100             #TODO 1000
     max_seconds = 60.0          #TODO longer?
+
     upload_spec_channel, metadatas_channel = files_upload_start(auth)
     num_files = 0
     start_time = time()
@@ -680,87 +680,21 @@ function cmd_put(args)
     max_tasks = 4
     tasks = Channel{Nothing}[]
 
-    n = length(want_uploads)
-    # TODO: upload several files in parallel
-    for (i, (filename, source)) in enumerate(want_uploads)
-
-        function task(i, filename, source, result_channel::Channel{Nothing})
-            println("Info: Comparing content hash ($i/$n):",
-                    " $(quote_string(source))")
-            # Compare content hash before uploading
-            # TODO: remember missing parent directories, and don't try
-            # to get a content hash from Dropox in that case
-            need_upload = true
-            content = nothing
-            metadata = try
-                files_get_metadata(auth, filename)
-            catch ex
-                if ex isa DropboxError
-                    nothing
-                else
-                    rethrow(ex)
-                end
-            end
-            if metadata isa FileMetadata
-                size = filesize(source)
-                if metadata.size == size
-                    # Don't upload if content hash matches
-                    content = read(source)
-                    content_hash = calc_content_hash(content)
-                    if metadata.content_hash == content_hash
-                        println("Info: $(quote_string(source)):",
-                                " content hash matches; skipping upload")
-                        need_upload = false
-                    end
-                elseif metadata.size < size
-                    # TODO: Upload only missing fraction
-                end
-            end
-
-            # TODO: touch Dropbox file if upload is skipped?
-            if need_upload
-                data_channel = Channel{Vector{UInt8}}(0)
-                put!(upload_spec_channel, UploadSpec(data_channel, filename))
-                # Read in chunks of 150 MByte
-                chunksize = 150 * 1024 * 1024
-                bytes_total = filesize(source)
-                bytes_read = Int64(0)
-                open(source, "r") do io
-                    while !eof(io)
-                        pct = round(Int, 100.0 * bytes_read / bytes_total)
-                        println("Info: Uploading ($i/$n):",
-                                " $(quote_string(source))",
-                                " ($bytes_read bytes, $pct%)")
-                        chunk = read(io, chunksize)
-                        bytes_read += length(chunk)
-                        put!(data_channel, chunk)
-                    end
-                end
-                pct = round(Int, 100.0 * bytes_read / bytes_total)
-                println("Info: Uploading ($i/$n):",
-                        " $(quote_string(source))",
-                        " ($bytes_read bytes, $pct%)")
-                close(data_channel)
-            end
-
-            put!(result_channel, nothing)
-            close(result_channel)
-        end
+    for (i, (source, destination)) in enumerate(upload_channel)
+        push!(tasks,
+              Channel(ch -> upload_one_file(auth, i, source, destination,
+                                            upload_spec_channel, ch),
+                      ctype=Nothing))
 
         while length(tasks) >= max_tasks
             yield
-            old_tasks = tasks
-            tasks = Channel{Nothing}[]
-            for t in old_tasks
-                if isready(t)
-                    take!(t)
-                else
-                    push!(tasks, t)
-                end
+            function checktask(ch)
+                !isready(ch) && return true
+                take!(ch)
+                return false
             end
+            filter!(checktask, tasks)
         end
-        push!(tasks,
-              Channel(ch -> task(i, filename, source, ch), ctype=Nothing))
 
         num_files += 1
         if num_files >= max_files || time() - start_time >= max_seconds
@@ -768,26 +702,88 @@ function cmd_put(args)
             for t in tasks
                 take!(t)
             end
+            empty!(tasks)
             close(upload_spec_channel)
-            metadatas = take!(metadatas_channel)
+            take!(metadatas_channel)
             upload_spec_channel, metadatas_channel = files_upload_start(auth)
             num_files = 0
             start_time = time()
-            tasks = Channel{Nothing}[]
         end
-
     end
 
-    if num_files > 0
-        println("Info: Finishing upload")
-        for t in tasks
-            take!(t)
+    println("Info: Finishing upload")
+    for t in tasks
+        take!(t)
+    end
+    close(upload_spec_channel)
+    take!(metadatas_channel)
+
+    put!(result_channel, nothing)
+    close(result_channel)
+end
+
+function upload_one_file(auth::Authorization,
+                         i::Int,
+                         source::String, destination::String,
+                         upload_spec_channel::Channel{UploadSpec},
+                         result_channel::Channel{Nothing})
+    println("Info: Comparing content hash ($i): $(quote_string(source))")
+    # Compare content hash before uploading
+    # TODO: remember missing parent directories, and don't try to get
+    # a content hash from Dropox in that case
+    need_upload = true
+    content = nothing
+    metadata = try
+        files_get_metadata(auth, destination)
+    catch ex
+        if ex isa DropboxError
+            nothing
+        else
+            rethrow(ex)
         end
-        close(upload_spec_channel)
-        metadatas = take!(metadatas_channel)
+    end
+    if metadata isa FileMetadata
+        size = filesize(source)
+        if metadata.size == size
+            # Don't upload if content hash matches
+            content = read(source)
+            content_hash = calc_content_hash(content)
+            if metadata.content_hash == content_hash
+                println("Info: $(quote_string(source)):",
+                        " content hash matches; skipping upload")
+                need_upload = false
+            end
+        elseif metadata.size < size
+            # TODO: Upload only missing fraction
+        end
     end
 
-    return exit_code
+    # TODO: touch Dropbox file if upload is skipped?
+    if need_upload
+        data_channel = Channel{Vector{UInt8}}(0)
+        put!(upload_spec_channel, UploadSpec(data_channel, destination))
+        # Read in chunks of 150 MByte
+        chunksize = 150 * 1024 * 1024
+        bytes_total = filesize(source)
+        bytes_read = Int64(0)
+        open(source, "r") do io
+            while !eof(io)
+                pct = round(Int, 100.0 * bytes_read / bytes_total)
+                println("Info: Uploading ($i):",
+                        " $(quote_string(source)) ($bytes_read bytes, $pct%)")
+                chunk = read(io, chunksize)
+                bytes_read += length(chunk)
+                put!(data_channel, chunk)
+            end
+        end
+        pct = round(Int, 100.0 * bytes_read / bytes_total)
+        println("Info: Uploading ($i):",
+                " $(quote_string(source)) ($bytes_read bytes, $pct%)")
+        close(data_channel)
+    end
+
+    put!(result_channel, nothing)
+    close(result_channel)
 end
 
 
