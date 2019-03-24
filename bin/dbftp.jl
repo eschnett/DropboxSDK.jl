@@ -1,7 +1,7 @@
 #!/usr/bin/env julia
 
 # Find path of this script
-path = dirname(dirname(Base.PROGRAM_FILE))
+path = abspath(dirname(Base.PROGRAM_FILE), "..")
 
 # Activate the DropboxSDK package
 using Pkg
