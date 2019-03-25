@@ -38,15 +38,6 @@ end
 
 
 
-function takeifready!(ch::Channel{T})::Union{Nothing, T} where {T}
-    if !isready(ch)
-        return nothing
-    end
-    take!(ch)
-end
-
-
-
 include("types.jl")
 
 
