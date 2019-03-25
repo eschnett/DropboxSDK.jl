@@ -681,17 +681,19 @@ function upload_many_files(auth::Authorization,
     tasks = Channel{Nothing}[]
 
     for (i, (source, destination)) in enumerate(upload_channel)
+        # TODO: run these truly in parallel, using multi-threading
         push!(tasks,
               Channel(ch -> upload_one_file(auth, i, source, destination,
                                             upload_spec_channel, ch),
                       ctype=Nothing))
 
         while length(tasks) >= max_tasks
+            # TODO: Remove this comment
             # For some reason, "yield" doesn't work here -- it never
             # lets HTTP requests finish. Waiting for a short time here
             # works fine.
-            # yield
-            sleep(0.001)
+            yield()
+            # sleep(0.001)
             function checktask(ch)
                 !isready(ch) && return true
                 take!(ch)

@@ -173,6 +173,7 @@ Post a Content Upload request to the Dropbox API.
 # Vector{UInt8}
 # TODO: use canonicalize_headers = true
 # TODO: experiment with retry_non_idempotent = true
+# TODO: optionally set file time stamp
 function post_content_upload(auth::Authorization,
                              fun::String,
                              args::Union{Nothing, Dict},
@@ -1079,5 +1080,9 @@ function users_get_space_usage(auth::Authorization)::SpaceUsage
     res = post_rpc(auth, "users/get_space_usage")
     return SpaceUsage(res)
 end
+
+
+
+include("DropboxCLI.jl")
 
 end
