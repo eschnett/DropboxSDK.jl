@@ -14,12 +14,6 @@ using SHA
 Call the Unix `geteuid` function.
 """
 geteuid()::Int = ccall(:geteuid, Cint, ())
-"""
-    getuid()::Int
-
-Call the Unix `getuid` function.
-"""
-getuid()::Int = ccall(:getuid, Cint, ())
 
 
 
