@@ -779,7 +779,11 @@ function upload_one_file(auth::Authorization,
         bytes_read = Int64(0)
         open(source, "r") do io
             while !eof(io)
-                pct = round(Int, 100.0 * bytes_read / bytes_total)
+                if bytes_total == 0
+                    pct = "???"
+                else
+                    pct = round(Int, 100.0 * bytes_read / bytes_total)
+                end
                 println("Info: Uploading ($i):",
                         " $(quote_string(source)) ($bytes_read bytes, $pct%)")
                 chunk = read(io, chunksize)
@@ -787,7 +791,11 @@ function upload_one_file(auth::Authorization,
                 put!(data_channel, chunk)
             end
         end
-        pct = round(Int, 100.0 * bytes_read / bytes_total)
+        if bytes_total == 0
+            pct = "???"
+        else
+            pct = round(Int, 100.0 * bytes_read / bytes_total)
+        end
         println("Info: Uploading ($i):",
                 " $(quote_string(source)) ($bytes_read bytes, $pct%)")
         close(data_channel)
