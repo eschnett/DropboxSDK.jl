@@ -687,7 +687,11 @@ function upload_many_files(auth::Authorization,
                       ctype=Nothing))
 
         while length(tasks) >= max_tasks
-            yield
+            # For some reason, "yield" doesn't work here -- it never
+            # lets HTTP requests finish. Waiting for a short time here
+            # works fine.
+            # yield
+            sleep(0.001)
             function checktask(ch)
                 !isready(ch) && return true
                 take!(ch)
@@ -748,17 +752,17 @@ function upload_one_file(auth::Authorization,
             # Don't upload if content hash matches
             # content = read(source)
             # content_hash = calc_content_hash(content)
-            # Read in chunks of 150 MByte
-            data_channel, hash_channel = calc_content_hash_start()
+            # Read in chunks
+            data_channel, content_hash_channel = calc_content_hash_start()
             open(source, "r") do io
                 while !eof(io)
-                    chunksize = 150 * 1024 * 1024
+                    chunksize = 4 * 1024 * 1024
                     chunk = read(io, chunksize)
                     put!(data_channel, chunk)
                 end
             end
             close(data_channel)
-            content_hash = take!(hash_channel)
+            content_hash = take!(content_hash_channel)
             if metadata.content_hash == content_hash
                 println("Info: $(quote_string(source)):",
                         " content hash matches; skipping upload")
