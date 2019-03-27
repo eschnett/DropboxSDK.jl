@@ -618,7 +618,12 @@ function files_upload_start(auth::Authorization,
         put!(metadata_channel, metadata)
         close(metadata_channel)
     end
-    upload_channel = Channel(task, ctype=Vector{UInt8})
+    upload_channel = Channel(ch -> try
+                             task(ch)
+                             catch ex
+                             @show "upload_files(one)" ex
+                             rethrow(ex)
+                             end, ctype=Vector{UInt8})
     upload_channel, metadata_channel
 end
 
@@ -739,7 +744,12 @@ function files_upload_start(auth::Authorization
 
         tasks = Channel{Nothing}[]
         for upload_spec in upload_spec_channel
-            push!(tasks, Channel(ch -> task1(upload_spec, ch), ctype=Nothing))
+            push!(tasks, Channel(ch -> try
+                                 task1(upload_spec, ch)
+                                 catch ex
+                                 @show "upload_files(many)" ex
+                                 rethrow(ex)
+                                 end, ctype=Nothing))
         end
         for t in tasks
             take!(t)
@@ -862,7 +872,12 @@ function files_upload_start(auth::Authorization
         end
     end
 
-    upload_spec_channel = Channel(task, ctype=UploadSpec)
+    upload_spec_channel = Channel(ch -> try
+                                  task(ch)
+                                  catch ex
+                                  @show "upload files(specs)" ex
+                                  rethrow(ex)
+                                  end, ctype=UploadSpec)
     upload_spec_channel, metadatas_channel
 end
 
