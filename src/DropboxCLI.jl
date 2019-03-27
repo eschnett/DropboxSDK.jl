@@ -609,7 +609,12 @@ function cmd_put(args)
     end
 
     result_channel = Channel{Nothing}(0)
-    upload_channel = Channel(ch -> upload_many_files(auth, ch, result_channel),
+    upload_channel = Channel(ch -> try
+                             upload_many_files(auth, ch, result_channel)
+                             catch ex
+                             @show "upload_many_files" ex
+                             rethrow(ex)
+                             end,
                              ctype=Tuple{String, String}, csize=1000)
     for source in sources
         # Distinguish between files and directories
@@ -668,6 +673,7 @@ end
 function upload_many_files(auth::Authorization,
                            upload_channel::Channel{Tuple{String, String}},
                            result_channel::Channel{Nothing})
+    println("Info: upload_many_files.begin")
     # Use batches of at most 1000 files, and which upload in at most n
     # seconds
     max_files = 100             #TODO 1000
@@ -679,13 +685,24 @@ function upload_many_files(auth::Authorization,
 
     max_tasks = 4
     tasks = Channel{Nothing}[]
+    # tasks = Future[]
 
     for (i, (source, destination)) in enumerate(upload_channel)
-        # TODO: run these truly in parallel, using multi-threading
+        # TODO: run these truly in parallel, using multiple processes
+        # (this requires transferring the files_upload state to other
+        # processes)
         push!(tasks,
-              Channel(ch -> upload_one_file(auth, i, source, destination,
-                                            upload_spec_channel, ch),
+              Channel(ch -> try
+                      upload_one_file(auth, i, source, destination,
+                                      upload_spec_channel, ch)
+                      catch ex
+                      @show "upload_one_file" ex
+                      rethrow(ex)
+                      end,
                       ctype=Nothing))
+        # push!(tasks,
+        #       remotecall(upload_one_file, default_worker_pool,
+        #                  auth, i, source, destination, upload_spec_channel))
 
         while length(tasks) >= max_tasks
             # TODO: Remove this comment
@@ -726,6 +743,7 @@ function upload_many_files(auth::Authorization,
 
     put!(result_channel, nothing)
     close(result_channel)
+    println("Info: upload_many_files.end")
 end
 
 function upload_one_file(auth::Authorization,
@@ -733,6 +751,7 @@ function upload_one_file(auth::Authorization,
                          source::String, destination::String,
                          upload_spec_channel::Channel{UploadSpec},
                          result_channel::Channel{Nothing})
+    println("Info: upload_one_file.begin $(quote_string(source))")
     println("Info: Comparing content hash ($i): $(quote_string(source))")
     # Compare content hash before uploading
     # TODO: remember missing parent directories, and don't try to get
@@ -809,6 +828,7 @@ function upload_one_file(auth::Authorization,
 
     put!(result_channel, nothing)
     close(result_channel)
+    println("Info: upload_one_file.end $(quote_string(source))")
 end
 
 
