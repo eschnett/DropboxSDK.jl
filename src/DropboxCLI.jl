@@ -688,6 +688,7 @@ function upload_many_files(auth::Authorization,
     # tasks = Future[]
 
     for (i, (source, destination)) in enumerate(upload_channel)
+        println("Info: received upload spec")
         # TODO: run these truly in parallel, using multiple processes
         # (this requires transferring the files_upload state to other
         # processes)
@@ -712,9 +713,11 @@ function upload_many_files(auth::Authorization,
             yield()
             # sleep(0.001)
             function checktask(ch)
-                !isready(ch) && return true
-                take!(ch)
-                return false
+                if isready(ch)
+                    take!(ch)
+                    return false
+                end
+                return true
             end
             filter!(checktask, tasks)
         end
@@ -723,12 +726,18 @@ function upload_many_files(auth::Authorization,
         if num_files >= max_files || time() - start_time >= max_seconds
             println("Info: Flushing upload")
             for t in tasks
+                println("Info: waiting for task...")
                 take!(t)
             end
+            println("Info: done waiting tasks")
             empty!(tasks)
+            println("Info: closing upload spec channel...")
             close(upload_spec_channel)
+            println("Info: waiting for upload metadata...")
             take!(metadatas_channel)
+            println("Info: restarting uploads...")
             upload_spec_channel, metadatas_channel = files_upload_start(auth)
+            println("Info: done restarting uploads")
             num_files = 0
             start_time = time()
         end
@@ -736,12 +745,18 @@ function upload_many_files(auth::Authorization,
 
     println("Info: Finishing upload")
     for t in tasks
+        println("Info: waiting for task...")
         take!(t)
     end
+    println("Info: done waiting tasks")
+    println("Info: closing upload spec channel...")
     close(upload_spec_channel)
+    println("Info: waiting for upload metadata...")
     take!(metadatas_channel)
 
+    println("Info: signalling end of uploads...")
     put!(result_channel, nothing)
+    println("Info: shutting down...")
     close(result_channel)
     println("Info: upload_many_files.end")
 end
