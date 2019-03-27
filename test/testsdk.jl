@@ -28,12 +28,13 @@ end
     @assert sum(length.(contents)) == length(content)
     # @assert vcat(contents...) == content
 
-    data_channel, content_hash_channel = calc_content_hash_start()
+    data_channel = Channel{Vector{UInt8}}(0)
+    content_hash_task = schedule(@task calc_content_hash(data_channel))
     for content in contents
         put!(data_channel, content)
     end
     close(data_channel)
-    content_hash = take!(content_hash_channel)
+    content_hash = fetch(content_hash_task)
     @test (content_hash ==
            "8a6ebea6983dc68be1575676d3a8ec0d664cfee69b2dbcdf44087cf5d455fe12")
 end
@@ -114,12 +115,13 @@ end
 end
 
 @testset "Upload file in chunks" begin
-    upload_channel, metadata_channel =
-        files_upload_start(auth, "/$folder/file1")
+    upload_channel = Channel{Vector{UInt8}}(0)
+    upload_task = schedule(
+        @task files_upload(auth, "/$folder/file1", upload_channel))
     put!(upload_channel, Vector{UInt8}("Hello, "))
     put!(upload_channel, Vector{UInt8}("World!\n"))
     close(upload_channel)
-    metadata = take!(metadata_channel)
+    metadata = fetch(upload_task)
     @test metadata isa FileMetadata
     @test metadata.size == length("Hello, World!\n")
     entries = files_list_folder(auth, "/$folder", recursive=true)
@@ -136,10 +138,11 @@ end
 end
 
 @testset "Upload empty file in chunks" begin
-    upload_channel, metadata_channel =
-        files_upload_start(auth, "/$folder/file2")
+    upload_channel = Channel{Vector{UInt8}}(0)
+    upload_task = schedule(
+        @task files_upload(auth, "/$folder/file2", upload_channel))
     close(upload_channel)
-    metadata = take!(metadata_channel)
+    metadata = fetch(upload_task)
     @test metadata isa FileMetadata
     @test metadata.size == 0
     entries = files_list_folder(auth, "/$folder", recursive=true)
@@ -156,20 +159,20 @@ end
 end
 
 const numfiles = 4
-
 @testset "Upload several files" begin
-    upload_spec_channel, metadatas_channel = files_upload_start(auth)
+    upload_spec_channel = Channel{UploadSpec}(0)
+    upload_task = schedule(@task files_upload(auth, upload_spec_channel))
     for i in 0:numfiles-1
         data_channel = Channel{Vector{UInt8}}(0)
         put!(upload_spec_channel,
-             UploadSpec(data_channel, "/$folder/files$i"))
+             UploadSpec("/$folder/files$i", data_channel))
         for j in 1:i
             put!(data_channel, Vector{UInt8}("Hello, World!\n"))
         end
         close(data_channel)
     end
     close(upload_spec_channel)
-    metadatas = take!(metadatas_channel)
+    metadatas = fetch(upload_task)
     @test length(metadatas) == numfiles
     @test all(metadata isa FileMetadata for metadata in metadatas)
     @test all(metadata.size == (i-1) * length("Hello, World!\n")
@@ -193,9 +196,10 @@ end
 end
 
 @testset "Upload zero files" begin
-    upload_spec_channel, metadatas_channel = files_upload_start(auth)
+    upload_spec_channel = Channel{UploadSpec}(0)
+    upload_task = schedule(@task files_upload(auth, upload_spec_channel))
     close(upload_spec_channel)
-    metadatas = take!(metadatas_channel)
+    metadatas = fetch(upload_task)
     @test isempty(metadatas)
     entries = files_list_folder(auth, "/$folder", recursive=true)
     @test count(entry -> startswith(entry.path_display, "/$folder"),

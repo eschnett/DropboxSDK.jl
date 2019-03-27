@@ -97,17 +97,14 @@ documentation:
 - `files_download`: Get a file
 - `files_get_metadata`: Get metadata (size etc.) for a file or directory
 - `files_list_folder`: List directory content
-- `files_upload`: Upload one file
-- `files_upload_start`: Efficiently upload one large file in chunks,
-  or upload several files simultaneously
+- `files_upload`: Upload one or more files
 - `users_get_current_account`: Get information about the current account
 - `users_get_space_usage`: Get used and available space
 
 There are also a few local helper functions:
 
-- `calc_content_hash`: Calculate content hash (fingerprint) of a local file
-- `calc_content_hash_start`: Efficiently calculate content hash
-  (fingerprint) of a large local file
+- `calc_content_hash`: Calculate content hash (fingerprint) of a local
+  file
 - `get_authorization`: Read credentials from a configuration file
 
 The command line interface and the test cases also contain good

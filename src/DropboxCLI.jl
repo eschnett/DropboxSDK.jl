@@ -1,6 +1,7 @@
 module DropboxCLI
 
 using ArgParse
+using Base.Iterators
 
 using DropboxSDK
 
@@ -608,14 +609,8 @@ function cmd_put(args)
         return 1
     end
 
-    result_channel = Channel{Nothing}(0)
-    upload_channel = Channel(ch -> try
-                             upload_many_files(auth, ch, result_channel)
-                             catch ex
-                             @show "upload_many_files" ex
-                             rethrow(ex)
-                             end,
-                             ctype=Tuple{String, String}, csize=1000)
+    upload_channel = Channel{Tuple{String, String}}(1000)
+    upload_task = schedule(@task upload_many_files(auth, upload_channel))
     for source in sources
         # Distinguish between files and directories
         if !ispath(source)
@@ -664,111 +659,63 @@ function cmd_put(args)
         end
     end
     close(upload_channel)
-
-    take!(result_channel)
+    wait(upload_task)
 
     return exit_code
 end
 
 function upload_many_files(auth::Authorization,
-                           upload_channel::Channel{Tuple{String, String}},
-                           result_channel::Channel{Nothing})
-    println("Info: upload_many_files.begin")
+                           upload_channel::Channel{Tuple{String, String}}
+                           )::Nothing
     # Use batches of at most 1000 files, and which upload in at most n
     # seconds
     max_files = 100             #TODO 1000
     max_seconds = 60.0          #TODO longer?
 
-    upload_spec_channel, metadatas_channel = files_upload_start(auth)
-    num_files = 0
-    start_time = time()
+    while isready(upload_channel) || isopen(upload_channel)
 
-    max_tasks = 4
-    tasks = Channel{Nothing}[]
-    # tasks = Future[]
+        upload_spec_channel = Channel{UploadSpec}(0)
+        upload_spec_task =
+            schedule(@task files_upload(auth, upload_spec_channel))
 
-    for (i, (source, destination)) in enumerate(upload_channel)
-        println("Info: received upload spec")
-        # TODO: run these truly in parallel, using multiple processes
-        # (this requires transferring the files_upload state to other
-        # processes)
-        push!(tasks,
-              Channel(ch -> try
-                      upload_one_file(auth, i, source, destination,
-                                      upload_spec_channel, ch)
-                      catch ex
-                      @show "upload_one_file" ex
-                      rethrow(ex)
-                      end,
-                      ctype=Nothing))
-        # push!(tasks,
-        #       remotecall(upload_one_file, default_worker_pool,
-        #                  auth, i, source, destination, upload_spec_channel))
+        max_tasks = 4
+        tasks = Task[]
 
-        while length(tasks) >= max_tasks
-            # TODO: Remove this comment
-            # For some reason, "yield" doesn't work here -- it never
-            # lets HTTP requests finish. Waiting for a short time here
-            # works fine.
-            yield()
-            # sleep(0.001)
-            function checktask(ch)
-                if isready(ch)
-                    take!(ch)
-                    return false
-                end
-                return true
+        start_time = time()
+        for (i, (source, destination)) in
+            take(enumerate(upload_channel), max_files)
+
+            # TODO: run these truly in parallel, using multiple
+            # processes (this requires transferring the files_upload
+            # state to other processes)
+            push!(tasks,
+                  schedule(@task upload_one_file(auth, i, source, destination,
+                                                 upload_spec_channel)))
+            while length(tasks) >= max_tasks
+                yield()
+                filter!(!istaskdone, tasks)
             end
-            filter!(checktask, tasks)
+
+            time() > start_time + max_seconds && break
         end
 
-        num_files += 1
-        if num_files >= max_files || time() - start_time >= max_seconds
-            println("Info: Flushing upload")
-            for t in tasks
-                println("Info: waiting for task...")
-                take!(t)
-            end
-            println("Info: done waiting tasks")
-            empty!(tasks)
-            println("Info: closing upload spec channel...")
-            close(upload_spec_channel)
-            println("Info: waiting for upload metadata...")
-            take!(metadatas_channel)
-            println("Info: restarting uploads...")
-            upload_spec_channel, metadatas_channel = files_upload_start(auth)
-            println("Info: done restarting uploads")
-            num_files = 0
-            start_time = time()
+        println("Info: Finishing upload")
+        for t in tasks
+            wait(t)
         end
+        close(upload_spec_channel)
+        wait(upload_spec_task)
+
     end
 
-    println("Info: Finishing upload")
-    for t in tasks
-        println("Info: waiting for task...")
-        take!(t)
-    end
-    println("Info: done waiting tasks")
-    println("Info: closing upload spec channel...")
-    close(upload_spec_channel)
-    println("Info: waiting for upload metadata...")
-    take!(metadatas_channel)
-
-    println("Info: signalling end of uploads...")
-    put!(result_channel, nothing)
-    println("Info: shutting down...")
-    close(result_channel)
-    println("Info: upload_many_files.end")
+    return nothing
 end
 
 function upload_one_file(auth::Authorization,
-                         i::Int,
-                         source::String, destination::String,
-                         upload_spec_channel::Channel{UploadSpec},
-                         result_channel::Channel{Nothing})
-    println("Info: upload_one_file.begin $(quote_string(source))")
-    println("Info: Comparing content hash ($i): $(quote_string(source))")
+                         i::Int, source::String, destination::String,
+                         upload_spec_channel::Channel{UploadSpec})::Nothing
     # Compare content hash before uploading
+    println("Info: Comparing content hash ($i): $(quote_string(source))")
     # TODO: remember missing parent directories, and don't try to get
     # a content hash from Dropox in that case
     need_upload = true
@@ -789,7 +736,8 @@ function upload_one_file(auth::Authorization,
             # content = read(source)
             # content_hash = calc_content_hash(content)
             # Read in chunks
-            data_channel, content_hash_channel = calc_content_hash_start()
+            data_channel = Channel{Vector{UInt8}}(0)
+            content_hash_task = schedule(@task calc_content_hash(data_channel))
             open(source, "r") do io
                 while !eof(io)
                     chunksize = 4 * 1024 * 1024
@@ -798,7 +746,7 @@ function upload_one_file(auth::Authorization,
                 end
             end
             close(data_channel)
-            content_hash = take!(content_hash_channel)
+            content_hash = fetch(content_hash_task)
             if metadata.content_hash == content_hash
                 println("Info: $(quote_string(source)):",
                         " content hash matches; skipping upload")
@@ -811,8 +759,8 @@ function upload_one_file(auth::Authorization,
 
     # TODO: touch Dropbox file if upload is skipped?
     if need_upload
-        data_channel = Channel{Vector{UInt8}}(0)
-        put!(upload_spec_channel, UploadSpec(data_channel, destination))
+        content_channel = Channel{Vector{UInt8}}(0)
+        put!(upload_spec_channel, UploadSpec(destination, content_channel))
         # Read in chunks of 150 MByte
         chunksize = 150 * 1024 * 1024
         bytes_total = filesize(source)
@@ -828,7 +776,7 @@ function upload_one_file(auth::Authorization,
                         " $(quote_string(source)) ($bytes_read bytes, $pct%)")
                 chunk = read(io, chunksize)
                 bytes_read += length(chunk)
-                put!(data_channel, chunk)
+                put!(content_channel, chunk)
             end
         end
         if bytes_total == 0
@@ -838,12 +786,10 @@ function upload_one_file(auth::Authorization,
         end
         println("Info: Uploading ($i):",
                 " $(quote_string(source)) ($bytes_read bytes, $pct%)")
-        close(data_channel)
+        close(content_channel)
     end
 
-    put!(result_channel, nothing)
-    close(result_channel)
-    println("Info: upload_one_file.end $(quote_string(source))")
+    return nothing
 end
 
 
