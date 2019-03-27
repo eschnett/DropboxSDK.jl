@@ -32,6 +32,28 @@ end
 
 
 
+export start_task
+"""
+    start_task(fun::Function)::Task
+
+Create a new task from `fun` and schedule the task, similar to the
+`@task` macro. Also register a hook that shows exception and backtrace
+if the task fails.
+"""
+function start_task(fun::Function)::Task
+    function wrap()
+        try
+            fun()
+        catch ex
+            @show ex
+            rethrow(ex)
+        end
+    end
+    schedule(Task(wrap))
+end
+
+
+
 include("types.jl")
 
 
@@ -548,7 +570,8 @@ function files_upload(auth::Authorization,
     session_id = nothing
     offset = Int64(0)
     data_channel = Channel{Vector{UInt8}}(0)
-    content_hash_task = schedule(@task calc_content_hash(data_channel))
+    # content_hash_task = schedule(@task calc_content_hash(data_channel))
+    content_hash_task = start_task(() -> calc_content_hash(data_channel))
     for chunk in content_channel
         isempty(chunk) && continue
         if session_id === nothing
@@ -663,7 +686,9 @@ function files_upload(auth::Authorization,
     # TODO: parallelize loop
     upload_tasks = Task[]
     for upload_spec in upload_spec_channel
-        push!(upload_tasks, schedule(@task upload_one_file(auth, upload_spec)))
+        # push!(upload_tasks, schedule(@task upload_one_file(auth, upload_spec)))
+        push!(upload_tasks,
+              start_task(() -> upload_one_file(auth, upload_spec)))
     end
     upload_states = UploadState[]
     for t in upload_tasks
@@ -785,7 +810,8 @@ function upload_one_file(auth::Authorization,
     session_id = nothing
     offset = Int64(0)
     data_channel = Channel{Vector{UInt8}}(0)
-    content_hash_task = schedule(@task calc_content_hash(data_channel))
+    # content_hash_task = schedule(@task calc_content_hash(data_channel))
+    content_hash_task = start_task(() -> calc_content_hash(data_channel))
     for chunk in upload_spec.content_channel
         isempty(chunk) && continue
         if session_id === nothing

@@ -29,7 +29,8 @@ end
     # @assert vcat(contents...) == content
 
     data_channel = Channel{Vector{UInt8}}(0)
-    content_hash_task = schedule(@task calc_content_hash(data_channel))
+    # content_hash_task = schedule(@task calc_content_hash(data_channel))
+    content_hash_task = start_task(() -> calc_content_hash(data_channel))
     for content in contents
         put!(data_channel, content)
     end
@@ -116,8 +117,10 @@ end
 
 @testset "Upload file in chunks" begin
     upload_channel = Channel{Vector{UInt8}}(0)
-    upload_task = schedule(
-        @task files_upload(auth, "/$folder/file1", upload_channel))
+    # upload_task = schedule(
+    #     @task files_upload(auth, "/$folder/file1", upload_channel))
+    upload_task =
+        start_task(() -> files_upload(auth, "/$folder/file1", upload_channel))
     put!(upload_channel, Vector{UInt8}("Hello, "))
     put!(upload_channel, Vector{UInt8}("World!\n"))
     close(upload_channel)
@@ -139,8 +142,10 @@ end
 
 @testset "Upload empty file in chunks" begin
     upload_channel = Channel{Vector{UInt8}}(0)
-    upload_task = schedule(
-        @task files_upload(auth, "/$folder/file2", upload_channel))
+    # upload_task = schedule(
+    #     @task files_upload(auth, "/$folder/file2", upload_channel))
+    upload_task =
+        start_task(() -> files_upload(auth, "/$folder/file2", upload_channel))
     close(upload_channel)
     metadata = fetch(upload_task)
     @test metadata isa FileMetadata
@@ -161,7 +166,8 @@ end
 const numfiles = 4
 @testset "Upload several files" begin
     upload_spec_channel = Channel{UploadSpec}(0)
-    upload_task = schedule(@task files_upload(auth, upload_spec_channel))
+    # upload_task = schedule(@task files_upload(auth, upload_spec_channel))
+    upload_task = start_task(() -> files_upload(auth, upload_spec_channel))
     for i in 0:numfiles-1
         data_channel = Channel{Vector{UInt8}}(0)
         put!(upload_spec_channel,
@@ -197,7 +203,8 @@ end
 
 @testset "Upload zero files" begin
     upload_spec_channel = Channel{UploadSpec}(0)
-    upload_task = schedule(@task files_upload(auth, upload_spec_channel))
+    # upload_task = schedule(@task files_upload(auth, upload_spec_channel))
+    upload_task = start_task(() -> files_upload(auth, upload_spec_channel))
     close(upload_spec_channel)
     metadatas = fetch(upload_task)
     @test isempty(metadatas)
