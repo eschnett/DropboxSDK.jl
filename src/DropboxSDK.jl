@@ -40,15 +40,17 @@ Create a new task from `fun` and schedule the task, similar to the
 `@task` macro. Also register a hook that shows exception and backtrace
 if the task fails.
 """
-function start_task(fun::Function)::Task
+function start_task(fun::Function, info=nothing)::Task
     function wrap()
         try
             fun()
         catch ex
             println("Caught excpetion in task")
-            exstr = string(ex)
-            println(exstr[1:min(10000, end)])
-            println(catch_backtrace())
+            if info !== nothing
+                println("Context: ", string(info))
+            end
+            println("Exception: ", string(ex)[1:min(10000, end)])
+            println("Backtrace: ", catch_backtrace())
             rethrow()
         end
     end
@@ -573,8 +575,8 @@ function files_upload(auth::Authorization,
     session_id = nothing
     offset = Int64(0)
     data_channel = Channel{Vector{UInt8}}(0)
-    # content_hash_task = schedule(@task calc_content_hash(data_channel))
-    content_hash_task = start_task(() -> calc_content_hash(data_channel))
+    content_hash_task = start_task(() -> calc_content_hash(data_channel),
+                                   (:files_upload, :calc_content_hash, path))
     for chunk in content_channel
         isempty(chunk) && continue
         if session_id === nothing
@@ -689,9 +691,10 @@ function files_upload(auth::Authorization,
     # TODO: parallelize loop
     upload_tasks = Task[]
     for upload_spec in upload_spec_channel
-        # push!(upload_tasks, schedule(@task upload_one_file(auth, upload_spec)))
         push!(upload_tasks,
-              start_task(() -> upload_one_file(auth, upload_spec)))
+              start_task(() -> upload_one_file(auth, upload_spec),
+                         (:files_upload, :upload_one_file,
+                          upload_spec.destination)))
     end
     upload_states = UploadState[]
     for t in upload_tasks
@@ -813,8 +816,9 @@ function upload_one_file(auth::Authorization,
     session_id = nothing
     offset = Int64(0)
     data_channel = Channel{Vector{UInt8}}(0)
-    # content_hash_task = schedule(@task calc_content_hash(data_channel))
-    content_hash_task = start_task(() -> calc_content_hash(data_channel))
+    content_hash_task = start_task(() -> calc_content_hash(data_channel),
+                                   (:upload_one_file, :calc_content_hash,
+                                    upload_spec.destination))
     for chunk in upload_spec.content_channel
         isempty(chunk) && continue
         if session_id === nothing

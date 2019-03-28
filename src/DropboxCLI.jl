@@ -610,8 +610,9 @@ function cmd_put(args)
     end
 
     upload_channel = Channel{Tuple{String, String}}(1000)
-    # upload_task = schedule(@task upload_many_files(auth, upload_channel))
-    upload_task = start_task(() -> upload_many_files(auth, upload_channel))
+    upload_task =
+        start_task(() -> upload_many_files(auth, upload_channel),
+                   (:cmd_put, :upload_many_files, sources, destination))
     for source in sources
         # Distinguish between files and directories
         if !ispath(source)
@@ -676,10 +677,9 @@ function upload_many_files(auth::Authorization,
     while isready(upload_channel) || isopen(upload_channel)
 
         upload_spec_channel = Channel{UploadSpec}(0)
-        # upload_spec_task =
-        #     schedule(@task files_upload(auth, upload_spec_channel))
         upload_spec_task =
-            start_task(() -> files_upload(auth, upload_spec_channel))
+            start_task(() -> files_upload(auth, upload_spec_channel),
+                       (:upload_many_files, :files_upload))
 
         max_tasks = 4
         tasks = Task[]
@@ -691,12 +691,11 @@ function upload_many_files(auth::Authorization,
             # TODO: run these truly in parallel, using multiple
             # processes (this requires transferring the files_upload
             # state to other processes)
-            # push!(tasks,
-            #       schedule(@task upload_one_file(auth, i, source, destination,
-            #                                      upload_spec_channel)))
             push!(tasks,
                   start_task(() -> upload_one_file(auth, i, source, destination,
-                                                   upload_spec_channel)))
+                                                   upload_spec_channel),
+                             (:upload_many_files, :upload_one_files,
+                              i, source, destination)))
             while length(tasks) >= max_tasks
                 yield()
                 filter!(!istaskdone, tasks)
@@ -743,9 +742,10 @@ function upload_one_file(auth::Authorization,
             # content_hash = calc_content_hash(content)
             # Read in chunks
             data_channel = Channel{Vector{UInt8}}(0)
-            # content_hash_task = schedule(@task calc_content_hash(data_channel))
             content_hash_task =
-                start_task(() -> calc_content_hash(data_channel))
+                start_task(() -> calc_content_hash(data_channel),
+                           (:upload_one_file, :calc_content_hash,
+                            i, source, destination))
             open(source, "r") do io
                 while !eof(io)
                     chunksize = 4 * 1024 * 1024
