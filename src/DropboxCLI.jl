@@ -674,6 +674,9 @@ function upload_many_files(auth::Authorization,
     max_files = 1000            # Dropbox limit
     max_seconds = 300.0         # 5 minutes
 
+    nfiles = 0
+    i = 0
+    n = Ref(0)
     while isready(upload_channel) || isopen(upload_channel)
 
         upload_spec_channel = Channel{UploadSpec}(0)
@@ -685,17 +688,19 @@ function upload_many_files(auth::Authorization,
         tasks = Task[]
 
         start_time = time()
-        for (i, (source, destination)) in
-            take(enumerate(upload_channel), max_files)
+        for (source, destination) in take(upload_channel, max_files)
+            i += 1
+            n[] = i + Base.n_avail(upload_channel)
 
             # TODO: run these truly in parallel, using multiple
             # processes (this requires transferring the files_upload
             # state to other processes)
             push!(tasks,
-                  start_task(() -> upload_one_file(auth, i, source, destination,
+                  start_task(() -> upload_one_file(auth,
+                                                   i, n, source, destination,
                                                    upload_spec_channel),
                              (:upload_many_files, :upload_one_files,
-                              i, source, destination)))
+                              i, n, source, destination)))
             while length(tasks) >= max_tasks
                 yield()
                 filter!(!istaskdone, tasks)
@@ -704,7 +709,7 @@ function upload_many_files(auth::Authorization,
             time() > start_time + max_seconds && break
         end
 
-        println("Info: Finishing upload")
+        println("Info: Finalizing upload")
         for t in tasks
             wait(t)
         end
@@ -717,10 +722,11 @@ function upload_many_files(auth::Authorization,
 end
 
 function upload_one_file(auth::Authorization,
-                         i::Int, source::String, destination::String,
+                         i::Int, n::Ref{Int},
+                         source::String, destination::String,
                          upload_spec_channel::Channel{UploadSpec})::Nothing
     # Compare content hash before uploading
-    println("Info: Comparing content hash ($i): $(quote_string(source))")
+    println("Info: Comparing content hash ($i/$(n[])): $(quote_string(source))")
     # TODO: remember missing parent directories, and don't try to get
     # a content hash from Dropox in that case
     need_upload = true
@@ -745,7 +751,7 @@ function upload_one_file(auth::Authorization,
             content_hash_task =
                 start_task(() -> calc_content_hash(data_channel),
                            (:upload_one_file, :calc_content_hash,
-                            i, source, destination))
+                            i, n, source, destination))
             open(source, "r") do io
                 while !eof(io)
                     chunksize = 4 * 1024 * 1024
@@ -788,7 +794,7 @@ function upload_one_file(auth::Authorization,
                 else
                     pct = round(Int, 100.0 * bytes_read / bytes_total)
                 end
-                println("Info: Uploading ($i):",
+                println("Info: Uploading ($i/$(n[])):",
                         " $(quote_string(source)) ($bytes_read bytes, $pct%)")
                 chunk = read(io, chunksize)
                 bytes_read += length(chunk)
@@ -800,7 +806,7 @@ function upload_one_file(auth::Authorization,
         else
             pct = round(Int, 100.0 * bytes_read / bytes_total)
         end
-        println("Info: Uploading ($i):",
+        println("Info: Uploading ($i/$(n[])):",
                 " $(quote_string(source)) ($bytes_read bytes, $pct%)")
         close(content_channel)
     end
