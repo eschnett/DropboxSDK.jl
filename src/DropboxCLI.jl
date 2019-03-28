@@ -669,10 +669,10 @@ end
 function upload_many_files(auth::Authorization,
                            upload_channel::Channel{Tuple{String, String}}
                            )::Nothing
-    # Use batches of at most 1000 files, and which upload in at most n
+    # Use batches of at most N files, and which upload in at most S
     # seconds
-    max_files = 100             #TODO 1000
-    max_seconds = 60.0          #TODO longer?
+    max_files = 1000            # Dropbox limit
+    max_seconds = 300.0         # 5 minutes
 
     while isready(upload_channel) || isopen(upload_channel)
 
@@ -762,6 +762,14 @@ function upload_one_file(auth::Authorization,
             end
         elseif metadata.size < size
             # TODO: Upload only missing fraction
+        end
+        if need_upload
+            # The file exists, but is different. We need to delete it
+            # before it can be re-uploaded.
+            # TODO: Upload to a temporary name, then rename.
+            println("Info: $(quote_string(source)):",
+                    " content hash differs; deleting file first")
+            files_delete(auth, destination)
         end
     end
 

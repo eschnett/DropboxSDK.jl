@@ -74,7 +74,18 @@ end
         lines = runcmd(`put $filename $folder`)
         @test length(lines) == 0
 
-        lines = runcmd(`put $filename $folder/hello`)
+        lines = runcmd(`put $filename $folder/hello1`)
+        @test length(lines) == 0
+
+        # Upload same file again
+        lines = runcmd(`put $filename $folder/hello1`)
+        @test length(lines) == 0
+
+        # Upload different file with same name
+        filename1 = joinpath(dir, "hello1")
+        content1 = Vector{UInt8}("Hello, World 1!\n")
+        write(filename1, content1)
+        lines = runcmd(`put $filename1 $folder/hello1`)
         @test length(lines) == 0
 
         filename2 = joinpath(dir, "hello2")
@@ -103,7 +114,10 @@ end
         lines = runcmd(`cmp $filename $folder`)
         @test length(lines) == 0
 
-        lines = runcmd(`cmp $filename $folder/hello`)
+        filename1 = joinpath(dir, "hello1")
+        content1 = Vector{UInt8}("Hello, World 1!\n")
+        write(filename1, content1)
+        lines = runcmd(`cmp $filename1 $folder/hello1`)
         @test length(lines) == 0
 
         lines = runcmd(`cmp $filename $folder/hello2`; wrap=ignorestatus)
@@ -132,19 +146,22 @@ end
 
 @testset "Command ls" begin
     lines = runcmd(`ls $folder`)
-    @test length(lines) == 3
-    @test lines[1] == "dir"
-    @test lines[2] == "hello"
-    @test lines[3] == "hello2"
+    @test lines == ["dir",
+                    "hello",
+                    "hello1",
+                    "hello2",
+                    ]
 
     lines = runcmd(`ls -l $folder`)
-    @test length(lines) == 3
+    @test length(lines) == 4
     @test startswith(lines[1], "d    ")
     @test startswith(lines[2], "- 14 ")
     @test startswith(lines[3], "- 16 ")
+    @test startswith(lines[4], "- 16 ")
     @test endswith(lines[1], " dir")
     @test endswith(lines[2], " hello")
-    @test endswith(lines[3], " hello2")
+    @test endswith(lines[3], " hello1")
+    @test endswith(lines[4], " hello2")
 end
 
 
@@ -157,10 +174,11 @@ end
         content = read(filename)
         @test String(content) == "Hello, World!\n"
 
-        lines = runcmd(`get $folder/hello $filename`)
+        filename1 = joinpath(dir, "hello1")
+        lines = runcmd(`get $folder/hello1 $filename1`)
         @test length(lines) == 0
-        content = read(joinpath(dir, "hello"))
-        @test String(content) == "Hello, World!\n"
+        content = read(joinpath(dir, "hello1"))
+        @test String(content) == "Hello, World 1!\n"
 
         filename2 = joinpath(dir, "hello2")
         lines = runcmd(`get $folder/hello2 $filename2`)
