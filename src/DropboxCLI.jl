@@ -782,35 +782,38 @@ function upload_one_file(auth::Authorization,
 
     # TODO: touch Dropbox file if upload is skipped?
     if need_upload
+        println("Info: Uploading ($i/$(n[]))")
         content_channel = Channel{Vector{UInt8}}(0)
         put!(upload_spec_channel, UploadSpec(destination, content_channel))
         # Read in chunks of 150 MByte
         chunksize = 150 * 1024 * 1024
         bytes_total = filesize(source)
         bytes_read = Int64(0)
+        start_time = time()
         open(source, "r") do io
             while !eof(io)
-                if bytes_total == 0
-                    pct = "???"
-                else
-                    pct = round(Int, 100.0 * bytes_read / bytes_total)
-                end
-                println("Info: Uploading ($i/$(n[])):",
-                        " $(quote_string(source)) ($bytes_read bytes, $pct%)")
-                println("Info: Debug: reading chunk ($i/$(n[])...")
+                # println("Info: Debug: reading chunk ($i/$(n[]))...")
                 chunk = read(io, chunksize)
                 bytes_read += length(chunk)
-                println("Info: Debug: sending chunk ($i/$(n[])...")
+                # println("Info: Debug: sending chunk ($i/$(n[]))...")
                 put!(content_channel, chunk)
+                if bytes_total == 0 || bytes_read == 0
+                    ratio = 1.0
+                    rate = 0
+                else
+                    ratio = bytes_read / bytes_total
+                    rate = (time() - start_time) / bytes_read
+                end
+                bscale, bprefix = find_prefix(bytes_read)
+                rscale, rprefix = find_prefix(rate)
+                println(
+                    "Info: Uploading ($i/$(n[])):",
+                    " $(quote_string(source))",
+                    " ($(round(bytes_read / bscale, sigdigits=3)) $(bprefix)B,",
+                    " $(round(Int, 100 * ratio))%,",
+                    " $(round(rate / rscale, sigdigits=3)) $(rprefix)B/s)")
             end
         end
-        if bytes_total == 0
-            pct = "???"
-        else
-            pct = round(Int, 100.0 * bytes_read / bytes_total)
-        end
-        println("Info: Uploading ($i/$(n[])):",
-                " $(quote_string(source)) ($bytes_read bytes, $pct%)")
         close(content_channel)
     end
 
