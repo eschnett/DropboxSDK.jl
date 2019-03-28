@@ -695,12 +695,13 @@ function upload_many_files(auth::Authorization,
             # TODO: run these truly in parallel, using multiple
             # processes (this requires transferring the files_upload
             # state to other processes)
+            j = i
             push!(tasks,
                   start_task(() -> upload_one_file(auth,
-                                                   i, n, source, destination,
+                                                   j, n, source, destination,
                                                    upload_spec_channel),
                              (:upload_many_files, :upload_one_files,
-                              i, n, source, destination)))
+                              j, n, source, destination)))
             while length(tasks) >= max_tasks
                 yield()
                 filter!(!istaskdone, tasks)
@@ -796,8 +797,10 @@ function upload_one_file(auth::Authorization,
                 end
                 println("Info: Uploading ($i/$(n[])):",
                         " $(quote_string(source)) ($bytes_read bytes, $pct%)")
+                println("Info: Debug: reading chunk ($i/$(n[])...")
                 chunk = read(io, chunksize)
                 bytes_read += length(chunk)
+                println("Info: Debug: sending chunk ($i/$(n[])...")
                 put!(content_channel, chunk)
             end
         end

@@ -69,7 +69,7 @@ end
 @testset "Command put" begin
     mktempdir() do dir
         filename = joinpath(dir, "hello")
-        content = Vector{UInt8}("Hello, World!\n")
+        content = "Hello, World!\n"
         write(filename, content)
         lines = runcmd(`put $filename $folder`)
         @test length(lines) == 0
@@ -83,13 +83,13 @@ end
 
         # Upload different file with same name
         filename1 = joinpath(dir, "hello1")
-        content1 = Vector{UInt8}("Hello, World 1!\n")
+        content1 = "Hello, World 1!\n"
         write(filename1, content1)
         lines = runcmd(`put $filename1 $folder/hello1`)
         @test length(lines) == 0
 
         filename2 = joinpath(dir, "hello2")
-        content2 = Vector{UInt8}("Hello, World 2!\n")
+        content2 = "Hello, World 2!\n"
         write(filename2, content2)
         lines = runcmd(`put $filename2 $folder/hello2`)
         @test length(lines) == 0
@@ -97,7 +97,7 @@ end
         dirname = joinpath(dir, "dir")
         mkdir(dirname)
         filename3 = joinpath(dirname, "hello3")
-        content3 = Vector{UInt8}("Hello, World 3!\n")
+        content3 = "Hello, World 3!\n"
         write(filename3, content3)
         lines = runcmd(`put $dirname $folder`)
         @test length(lines) == 0
@@ -109,13 +109,13 @@ end
 @testset "Command cmp" begin
     mktempdir() do dir
         filename = joinpath(dir, "hello")
-        content = Vector{UInt8}("Hello, World!\n")
+        content = "Hello, World!\n"
         write(filename, content)
         lines = runcmd(`cmp $filename $folder`)
         @test length(lines) == 0
 
         filename1 = joinpath(dir, "hello1")
-        content1 = Vector{UInt8}("Hello, World 1!\n")
+        content1 = "Hello, World 1!\n"
         write(filename1, content1)
         lines = runcmd(`cmp $filename1 $folder/hello1`)
         @test length(lines) == 0
@@ -126,7 +126,7 @@ end
         @test lines[1] == "$quoted_filename: File size differs"
 
         filename2 = joinpath(dir, "hello2")
-        content2 = Vector{UInt8}("Hello, World 2!\n")
+        content2 = "Hello, World 2!\n"
         write(filename2, content2)
         lines = runcmd(`cmp $filename2 $folder/hello2`)
         @test length(lines) == 0
@@ -135,7 +135,7 @@ end
         dirname = joinpath(dir, "dir")
         mkdir(dirname)
         filename3 = joinpath(dirname, "hello3")
-        content3 = Vector{UInt8}("Hello, World 3!\n")
+        content3 = "Hello, World 3!\n"
         write(filename3, content3)
         lines = runcmd(`cmp $filename3 $folder/dir/hello3`)
         @test length(lines) == 0
@@ -171,30 +171,29 @@ end
         filename = joinpath(dir, "hello")
         lines = runcmd(`get $folder/hello $dir`)
         @test length(lines) == 0
-        content = read(filename)
-        @test String(content) == "Hello, World!\n"
+        content = read(filename, String)
+        @test content == "Hello, World!\n"
 
         filename1 = joinpath(dir, "hello1")
         lines = runcmd(`get $folder/hello1 $filename1`)
         @test length(lines) == 0
-        content = read(joinpath(dir, "hello1"))
-        @test String(content) == "Hello, World 1!\n"
+        content = read(filename1, String)
+        @test content == "Hello, World 1!\n"
 
         filename2 = joinpath(dir, "hello2")
         lines = runcmd(`get $folder/hello2 $filename2`)
         @test length(lines) == 0
-        content2 = read(filename2)
-        @test String(content2) == "Hello, World 2!\n"
+        content2 = read(filename2, String)
+        @test content2 == "Hello, World 2!\n"
 
         # TODO: download recursively
         dirname = joinpath(dir, "dir")
         mkdir(dirname)
         filename3 = joinpath(dirname, "hello3")
-        content3 = Vector{UInt8}("Hello, World 3!\n")
         lines = runcmd(`get $folder/dir/hello3 $filename3`)
         @test length(lines) == 0
-        content3 = read(filename3)
-        @test String(content3) == "Hello, World 3!\n"
+        content3 = read(filename3, String)
+        @test content3 == "Hello, World 3!\n"
     end
 end
 
