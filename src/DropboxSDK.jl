@@ -47,9 +47,9 @@ function start_task(fun::Function)::Task
         catch ex
             println("Caught excpetion in task")
             exstr = string(ex)
-            println(exstr[1:min(100*1000, end)])
+            println(exstr[1:min(10000, end)])
             println(catch_backtrace())
-            rethrow(ex)
+            rethrow()
         end
     end
     schedule(Task(wrap))
