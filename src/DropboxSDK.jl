@@ -45,7 +45,10 @@ function start_task(fun::Function)::Task
         try
             fun()
         catch ex
-            @show ex
+            println("Caught excpetion in task")
+            exstr = string(ex)
+            println(exstr[1:max(100*1000, end)])
+            println(catch_backtrace())
             rethrow(ex)
         end
     end
