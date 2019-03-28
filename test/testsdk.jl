@@ -28,7 +28,7 @@ end
     @assert sum(length.(contents)) == length(content)
     # @assert vcat(contents...) == content
 
-    data_channel = Channel{Vector{UInt8}}(0)
+    data_channel = Channel{AbstractVector{UInt8}}(0)
     # content_hash_task = schedule(@task calc_content_hash(data_channel))
     content_hash_task = start_task(() -> calc_content_hash(data_channel))
     for content in contents
