@@ -671,24 +671,27 @@ function upload_many_files(auth::Authorization,
                            )::Nothing
     # Use batches of at most N files, and which upload in at most S
     # seconds
-    max_files = 1000            # Dropbox limit is 1000
+    max_files = 10 # 1000            # Dropbox limit is 1000
     max_seconds = 300.0         # 5 minutes
+    max_tasks = 4
 
-    nfiles = 0
+    finalize_task = nothing
+    old_tasks = Task[]
+
     i = 0
     n = Ref(0)
     while isready(upload_channel) || isopen(upload_channel)
 
+        nuploads = 0
         upload_spec_channel = Channel{UploadSpec}(0)
         upload_spec_task =
             start_task(() -> files_upload(auth, upload_spec_channel),
                        (:upload_many_files, :files_upload))
 
-        max_tasks = 4
         tasks = Task[]
 
         start_time = time()
-        for (source, destination) in take(upload_channel, max_files)
+        for (source, destination) in upload_channel
             i += 1
             n[] = i + Base.n_avail(upload_channel)
 
@@ -697,32 +700,55 @@ function upload_many_files(auth::Authorization,
             # state to other processes)
             # TODO: only count files that are actually uploaded
             # against the "max_files" limit
-            j = i
+            j,m = i,n[]
             push!(tasks,
                   start_task(() -> upload_one_file(auth,
                                                    j, n, source, destination,
                                                    upload_spec_channel),
                              (:upload_many_files, :upload_one_files,
-                              j, n, source, destination)))
-            while length(tasks) >= max_tasks
+                              j, m, source, destination)))
+            while length(tasks) + length(old_tasks) >= max_tasks
                 yield()
-                filter!(!istaskdone, tasks)
+                function check_task(t)
+                    if istaskdone(t)
+                        did_upload = fetch(t)
+                        nuploads += did_upload
+                        return false
+                    end
+                    return true
+                end
+                filter!(check_task, tasks)
             end
 
-            time() > start_time + max_seconds && break
+            upload_cond = nuploads + length(tasks) >= max_files
+            time_cond = time() - start_time >= max_seconds
+            (upload_cond || time_cond) && break
         end
 
         # TODO: Begin to upload the files for the next batch while the
         # current batch is finalized. Only the finalization itself
         # needs to be serialized.
         println("Info: Finalizing upload")
-        for t in tasks
-            wait(t)
+        function finalize()
+            while !isempty(old_tasks)
+                yield()
+                filter!(!istaskdone, old_tasks)
+            end
+            close(upload_spec_channel)
+            wait(upload_spec_task)
         end
-        close(upload_spec_channel)
-        wait(upload_spec_task)
+        finalize_task !== nothing && wait(finalize_task)
+        @assert isempty(old_tasks)
+        copy!(old_tasks, tasks)
+        empty!(tasks)
+        j,m = i,n[]
+        finalize_task = start_task(finalize,
+                                   (:upload_many_files, :finalize, j, m))
 
     end
+
+    finalize_task !== nothing && wait(finalize_task)
+    @assert isempty(old_tasks)
 
     return nothing
 end
@@ -730,7 +756,7 @@ end
 function upload_one_file(auth::Authorization,
                          i::Int, n::Ref{Int},
                          source::String, destination::String,
-                         upload_spec_channel::Channel{UploadSpec})::Nothing
+                         upload_spec_channel::Channel{UploadSpec})::Bool
     # Compare content hash before uploading
     # TODO: remember missing parent directories, and don't try to get
     # a content hash from Dropox in that case
@@ -825,7 +851,7 @@ function upload_one_file(auth::Authorization,
         close(content_channel)
     end
 
-    return nothing
+    return need_upload
 end
 
 
