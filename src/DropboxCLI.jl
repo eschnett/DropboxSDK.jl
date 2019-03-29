@@ -802,7 +802,7 @@ function upload_one_file(auth::Authorization,
                     rate = 0
                 else
                     ratio = bytes_read / bytes_total
-                    rate = (time() - start_time) / bytes_read
+                    rate = bytes_read / max(1.0, time() - start_time)
                 end
                 bscale, bprefix = find_prefix(bytes_read)
                 rscale, rprefix = find_prefix(rate)
