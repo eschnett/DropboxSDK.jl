@@ -153,6 +153,8 @@ function post_rpc(auth::Authorization,
         body = HTTP.nobody
     end
 
+    retry_count = 0
+
     # We might need to retry several times
     while true
         try
@@ -180,6 +182,14 @@ function post_rpc(auth::Authorization,
                 end
 
                 throw(DropboxError(res))
+            elseif ex == ArgumentError(
+                "`unsafe_write` requires `iswritable(::SSLContext)`")
+
+                # This is an error in the HTTP module; we just retry
+                retry_count += 1
+                if retry_count <= 2
+                    continue
+                end
             end
             rethrow(ex)
         end
@@ -211,6 +221,8 @@ function post_content_upload(auth::Authorization,
     push!(headers, "Content-Type" => "application/octet-stream")
     body = content
 
+    retry_count = 0
+
     # We might need to retry several times
     while true
         try
@@ -238,6 +250,14 @@ function post_content_upload(auth::Authorization,
                 end
 
                 throw(DropboxError(res))
+            elseif ex == ArgumentError(
+                "`unsafe_write` requires `iswritable(::SSLContext)`")
+
+                # This is an error in the HTTP module; we just retry
+                retry_count += 1
+                if retry_count <= 2
+                    continue
+                end
             end
             rethrow(ex)
         end
@@ -262,6 +282,8 @@ function post_content_download(auth::Authorization,
                ]
     push!(headers, "Dropbox-API-Arg" => JSON.json(args))
     push!(headers, "Content-Type" => "application/octet-stream")
+
+    retry_count = 0
 
     # We might need to retry several times
     while true
@@ -293,6 +315,14 @@ function post_content_download(auth::Authorization,
                 end
 
                 throw(DropboxError(res))
+            elseif ex == ArgumentError(
+                "`unsafe_write` requires `iswritable(::SSLContext)`")
+
+                # This is an error in the HTTP module; we just retry
+                retry_count += 1
+                if retry_count <= 2
+                    continue
+                end
             end
             rethrow(ex)
         end
