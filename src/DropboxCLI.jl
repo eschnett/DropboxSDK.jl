@@ -671,8 +671,8 @@ function upload_many_files(auth::Authorization,
                            )::Nothing
     # Use batches of at most N files, and which upload in at most S
     # seconds
-    max_files = 100             # TODO 1000   # Dropbox limit
-    max_seconds = 60.0          # TODO 300.0
+    max_files = 1000            # Dropbox limit
+    max_seconds = 300.0         # 5 minutes
 
     nfiles = 0
     i = 0
@@ -710,6 +710,9 @@ function upload_many_files(auth::Authorization,
             time() > start_time + max_seconds && break
         end
 
+        # TODO: Begin to upload the files for the next batch while the
+        # current batch is finalized. Only the finalization itself
+        # needs to be serialized.
         println("Info: Finalizing upload")
         for t in tasks
             wait(t)
