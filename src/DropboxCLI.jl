@@ -671,8 +671,8 @@ function upload_many_files(auth::Authorization,
                            )::Nothing
     # Use batches of at most N files, and which upload in at most S
     # seconds
-    max_files = 1000            # Dropbox limit
-    max_seconds = 300.0         # 5 minutes
+    max_files = 100             # TODO 1000   # Dropbox limit
+    max_seconds = 60.0          # TODO 300.0
 
     nfiles = 0
     i = 0
@@ -727,7 +727,6 @@ function upload_one_file(auth::Authorization,
                          source::String, destination::String,
                          upload_spec_channel::Channel{UploadSpec})::Nothing
     # Compare content hash before uploading
-    println("Info: Comparing content hash ($i/$(n[])): $(quote_string(source))")
     # TODO: remember missing parent directories, and don't try to get
     # a content hash from Dropox in that case
     need_upload = true
@@ -745,6 +744,8 @@ function upload_one_file(auth::Authorization,
         size = filesize(source)
         if metadata.size == size
             # Don't upload if content hash matches
+            println("Info: Comparing content hash ($i/$(n[])):",
+                    " $(quote_string(source))")
             # content = read(source)
             # content_hash = calc_content_hash(content)
             # Read in chunks
@@ -763,8 +764,9 @@ function upload_one_file(auth::Authorization,
             close(data_channel)
             content_hash = fetch(content_hash_task)
             if metadata.content_hash == content_hash
-                println("Info: $(quote_string(source)):",
-                        " content hash matches; skipping upload")
+                println(
+                    "Info: Content hash matches; skipping upload ($i/$(n[])):",
+                    " $(quote_string(source))")
                 need_upload = false
             end
         elseif metadata.size < size
@@ -774,8 +776,9 @@ function upload_one_file(auth::Authorization,
             # The file exists, but is different. We need to delete it
             # before it can be re-uploaded.
             # TODO: Upload to a temporary name, then rename.
-            println("Info: $(quote_string(source)):",
-                    " content hash differs; deleting file first")
+            println(
+                "Info: Content hash differs; deleting file first ($i/$(n[])):",
+                " $(quote_string(source))")
             files_delete(auth, destination)
         end
     end
