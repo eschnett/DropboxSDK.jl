@@ -188,6 +188,8 @@ function post_rpc(auth::Authorization,
                 # This is an error in the HTTP module; we just retry
                 retry_count += 1
                 if retry_count <= 2
+                    println("Info: Error $ex")
+                    println("Info: Retrying...")
                     continue
                 end
             end
@@ -256,6 +258,8 @@ function post_content_upload(auth::Authorization,
                 # This is an error in the HTTP module; we just retry
                 retry_count += 1
                 if retry_count <= 2
+                    println("Info: Error $ex")
+                    println("Info: Retrying...")
                     continue
                 end
             end
@@ -321,6 +325,8 @@ function post_content_download(auth::Authorization,
                 # This is an error in the HTTP module; we just retry
                 retry_count += 1
                 if retry_count <= 2
+                    println("Info: Error $ex")
+                    println("Info: Retrying...")
                     continue
                 end
             end
