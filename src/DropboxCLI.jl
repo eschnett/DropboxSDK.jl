@@ -671,7 +671,7 @@ function upload_many_files(auth::Authorization,
                            )::Nothing
     # Use batches of at most N files, and which upload in at most S
     # seconds
-    max_files = 1000            # Dropbox limit
+    max_files = 250             # Dropbox limit is 1000
     max_seconds = 300.0         # 5 minutes
 
     nfiles = 0
@@ -695,6 +695,8 @@ function upload_many_files(auth::Authorization,
             # TODO: run these truly in parallel, using multiple
             # processes (this requires transferring the files_upload
             # state to other processes)
+            # TODO: only count files that are actually uploaded
+            # against the "max_files" limit
             j = i
             push!(tasks,
                   start_task(() -> upload_one_file(auth,
