@@ -739,7 +739,9 @@ function upload_many_files(auth::Authorization,
         end
         finalize_task !== nothing && wait(finalize_task)
         @assert isempty(old_tasks)
-        copy!(old_tasks, tasks)
+        # copy!(old_tasks, tasks)
+        resize!(old_tasks, length(tasks))
+        old_tasks[:] = tasks[:]
         empty!(tasks)
         j,m = i,n[]
         finalize_task = start_task(finalize,

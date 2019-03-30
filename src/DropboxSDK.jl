@@ -133,20 +133,19 @@ end
 
 
 
+# TODO: Use a timer instead
 const try_after = Ref(time())
-function set_retry_delay(retry_after::Real)::Nothing
+function set_retry_delay(retry_after::Real)
     @assert retry_after >= 0
     next_try = time() + retry_after
     try_after[] = max(try_after[], next_try)
-    nothing
 end
-function wait_for_retry()::Nothing
+function wait_for_retry()
     delay = try_after[] - time()
     if delay > 0
-        println("Info: Waiting $delay seconds...")
+        println("Info: Waiting $(round(delay, digits=1)) seconds...")
         sleep(delay)
     end
-    nothing
 end
 
 
@@ -264,8 +263,7 @@ function post_content_upload(auth::Authorization,
                 retry_after = mapget(s->parse(Float64, s), resp2, "retry-after")
                 if retry_after !== nothing
                     println("Warning $(ex.status): $(res["error_summary"])")
-                    println("Waiting $retry_after seconds...")
-                    sleep(retry_after)
+                    set_retry_delay(retry_after)
                     println("Retrying...")
                     continue
                 end
@@ -278,7 +276,6 @@ function post_content_upload(auth::Authorization,
                 retry_count += 1
                 if retry_count <= 2
                     println("Info: Error $ex")
-                    set_retry_delay(retry_after)
                     println("Info: Retrying...")
                     continue
                 end
@@ -333,8 +330,7 @@ function post_content_download(auth::Authorization,
                 retry_after = mapget(s->parse(Float64, s), resp2, "retry-after")
                 if retry_after !== nothing
                     println("Warning $(ex.status): $(res["error_summary"])")
-                    println("Waiting $retry_after seconds...")
-                    sleep(retry_after)
+                    set_retry_delay(retry_after)
                     println("Retrying...")
                     continue
                 end
@@ -347,7 +343,6 @@ function post_content_download(auth::Authorization,
                 retry_count += 1
                 if retry_count <= 2
                     println("Info: Error $ex")
-                    set_retry_delay(retry_after)
                     println("Info: Retrying...")
                     continue
                 end
