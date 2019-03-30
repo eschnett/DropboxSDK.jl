@@ -133,6 +133,22 @@ end
 
 
 
+const try_after = Ref(time())
+function set_retry_delay(retry_after::Real)::Nothing
+    @assert retry_after >= 0
+    next_try = time() + retry_after
+    try_after[] = max(try_after[], next_try)
+end
+function wait_for_retry()::Nothing
+    delay = try_after[] - time()
+    if delay > 0
+        println("Info: Waiting $delay seconds...")
+        sleep(delay)
+    end
+end
+
+
+
 """
     post_rpc(auth::Authorization,
              fun::String,
@@ -157,6 +173,7 @@ function post_rpc(auth::Authorization,
 
     # We might need to retry several times
     while true
+        wait_for_retry()
         try
             resp = HTTP.request(
                 "POST", "https://api.dropboxapi.com/2/$fun", headers, body;
@@ -175,8 +192,7 @@ function post_rpc(auth::Authorization,
                 retry_after = mapget(s->parse(Float64, s), resp2, "retry-after")
                 if retry_after !== nothing
                     println("Info: Error $(ex.status): $(res["error_summary"])")
-                    println("Info: Waiting $retry_after seconds...")
-                    sleep(retry_after)
+                    set_retry_delay(retry_after)
                     println("Info: Retrying...")
                     continue
                 end
@@ -227,6 +243,7 @@ function post_content_upload(auth::Authorization,
 
     # We might need to retry several times
     while true
+        wait_for_retry()
         try
             resp = HTTP.request(
                 "POST", "https://content.dropboxapi.com/2/$fun", headers, body;
@@ -259,6 +276,7 @@ function post_content_upload(auth::Authorization,
                 retry_count += 1
                 if retry_count <= 2
                     println("Info: Error $ex")
+                    set_retry_delay(retry_after)
                     println("Info: Retrying...")
                     continue
                 end
@@ -291,6 +309,7 @@ function post_content_download(auth::Authorization,
 
     # We might need to retry several times
     while true
+        wait_for_retry()
         try
             resp = HTTP.request(
                 "POST", "https://content.dropboxapi.com/2/$fun", headers;
@@ -326,6 +345,7 @@ function post_content_download(auth::Authorization,
                 retry_count += 1
                 if retry_count <= 2
                     println("Info: Error $ex")
+                    set_retry_delay(retry_after)
                     println("Info: Retrying...")
                     continue
                 end
