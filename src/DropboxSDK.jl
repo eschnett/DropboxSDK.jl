@@ -138,6 +138,7 @@ function set_retry_delay(retry_after::Real)::Nothing
     @assert retry_after >= 0
     next_try = time() + retry_after
     try_after[] = max(try_after[], next_try)
+    nothing
 end
 function wait_for_retry()::Nothing
     delay = try_after[] - time()
@@ -145,6 +146,7 @@ function wait_for_retry()::Nothing
         println("Info: Waiting $delay seconds...")
         sleep(delay)
     end
+    nothing
 end
 
 
