@@ -133,7 +133,6 @@ end
 
 
 
-# TODO: Use a timer instead
 const try_after = Ref(time())
 function set_retry_delay(retry_after::Real)
     @assert retry_after >= 0
@@ -209,7 +208,7 @@ function post_rpc(auth::Authorization,
                     println("Info: Retrying...")
                     continue
                 end
-            elseif (ex == ErrorException &&
+            elseif (ex isa ErrorException &&
                     startswith(ex.msg, "Unexpected end of input\nLine: 0\n"))
                 # I don't understand this error; maybe it is
                 # ephemeral? We will retry.
@@ -289,7 +288,7 @@ function post_content_upload(auth::Authorization,
                     println("Info: Retrying...")
                     continue
                 end
-            elseif (ex == ErrorException &&
+            elseif (ex isa ErrorException &&
                     startswith(ex.msg, "Unexpected end of input\nLine: 0\n"))
                 # I don't understand this error; maybe it is
                 # ephemeral? We will retry.
@@ -366,7 +365,7 @@ function post_content_download(auth::Authorization,
                     println("Info: Retrying...")
                     continue
                 end
-            elseif (ex == ErrorException &&
+            elseif (ex isa ErrorException &&
                     startswith(ex.msg, "Unexpected end of input\nLine: 0\n"))
                 # I don't understand this error; maybe it is
                 # ephemeral? We will retry.
