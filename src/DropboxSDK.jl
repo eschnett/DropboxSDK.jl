@@ -218,6 +218,15 @@ function post_rpc(auth::Authorization,
                     println("Info: Retrying...")
                     continue
                 end
+            elseif ex isa IOError
+                # I don't understand this error; maybe it is
+                # ephemeral? We will retry.
+                retry_count += 1
+                if retry_count <= 2
+                    println("Info: Error $ex")
+                    println("Info: Retrying...")
+                    continue
+                end
             end
             rethrow(ex)
         end
@@ -298,6 +307,15 @@ function post_content_upload(auth::Authorization,
                     println("Info: Retrying...")
                     continue
                 end
+            elseif ex isa IOError
+                # I don't understand this error; maybe it is
+                # ephemeral? We will retry.
+                retry_count += 1
+                if retry_count <= 2
+                    println("Info: Error $ex")
+                    println("Info: Retrying...")
+                    continue
+                end
             end
             rethrow(ex)
         end
@@ -367,6 +385,15 @@ function post_content_download(auth::Authorization,
                 end
             elseif (ex isa ErrorException &&
                     startswith(ex.msg, "Unexpected end of input\nLine: 0\n"))
+                # I don't understand this error; maybe it is
+                # ephemeral? We will retry.
+                retry_count += 1
+                if retry_count <= 2
+                    println("Info: Error $ex")
+                    println("Info: Retrying...")
+                    continue
+                end
+            elseif ex isa IOError
                 # I don't understand this error; maybe it is
                 # ephemeral? We will retry.
                 retry_count += 1
