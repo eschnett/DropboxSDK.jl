@@ -189,17 +189,15 @@ function post_http(auth::Authorization,
 
     @label retry_after_error
     retry_count += 1
+    if retry_count > 3
+        println("Info: Giving up.")
+        throw(DropboxError(result))
+    end
     if retry_count > 1
         println("Info: Retrying...")
     end
 
     @label retry_after_wait
-
-    retry_count += 1
-    if retry_count > 3
-        println("Info: Giving up.")
-        throw(DropboxError(result))
-    end
 
     wait_as_requested()
 
