@@ -645,6 +645,8 @@ function cmd_put(args)
             put!(upload_channel, (source, filename))
         else
             # Both source and destination are directories
+            # TODO: Instead of files/get_metadata, use
+            # files/list_folder, possibly with option recursive=true
             function walk_upload_entry(source_prefix::String,
                                        filename_prefix::String)
                 for entry in readdir(source)
@@ -695,17 +697,12 @@ function upload_many_files(auth::Authorization,
             i += 1
             n[] = i + Base.n_avail(upload_channel)
 
-            # TODO: run these truly in parallel, using multiple
-            # processes (this requires transferring the files_upload
-            # state to other processes)
-            # TODO: only count files that are actually uploaded
-            # against the "max_files" limit
             j,m = i,n[]
             push!(tasks,
                   start_task(() -> upload_one_file(auth,
                                                    j, n, source, destination,
                                                    upload_spec_channel),
-                             (:upload_many_files, :upload_one_files,
+                             (:upload_many_files, :upload_one_file,
                               j, m, source, destination)))
             while length(tasks) + length(old_tasks) >= max_tasks
                 yield()
@@ -725,9 +722,6 @@ function upload_many_files(auth::Authorization,
             (upload_cond || time_cond) && break
         end
 
-        # TODO: Begin to upload the files for the next batch while the
-        # current batch is finalized. Only the finalization itself
-        # needs to be serialized.
         println("Info: Finalizing upload")
         function finalize()
             while !isempty(old_tasks)
@@ -809,6 +803,7 @@ function upload_one_file(auth::Authorization,
             # The file exists, but is different. We need to delete it
             # before it can be re-uploaded.
             # TODO: Upload to a temporary name, then rename.
+            # TODO: Use WriteMode=overwrite instead of deleting.
             println(
                 "Info: Content hash differs; deleting file first ($i/$(n[])):",
                 " $(quote_string(source))")

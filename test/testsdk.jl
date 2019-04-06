@@ -61,14 +61,14 @@ end
 end
 
 @testset "List folder" begin
-    entries = files_list_folder(auth, "", recursive=true)
+    entries = files_list_folder(auth, "", recursive=false)
     @test count(entry -> startswith(entry.path_display, "/$folder"),
                 entries) == 0
 end
 
 @testset "Create folder" begin
     files_create_folder(auth, "/$folder")
-    entries = files_list_folder(auth, "", recursive=true)
+    entries = files_list_folder(auth, "", recursive=false)
     @test count(entry -> startswith(entry.path_display, "/$folder"),
                 entries) == 1
     @test count(entry -> entry.path_display == "/$folder", entries) == 1

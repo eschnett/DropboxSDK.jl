@@ -45,7 +45,7 @@ function start_task(fun::Function, info=nothing)::Task
         try
             fun()
         catch ex
-            println("Caught excpetion in task")
+            println("Caught exception in task")
             if info !== nothing
                 println("Context: ", string(info))
             end
@@ -149,6 +149,118 @@ end
 
 
 
+# TODO: experiment with retry_non_idempotent = true
+# TODO: optionally set file time stamp
+function post_http(auth::Authorization,
+                   url::String,
+                   args::Union{Nothing, Dict} = nothing;
+                   content = HTTP.nobody,
+                   expecting_content::Bool = false,
+                   verbose::Int = 0
+                   )::Tuple{Dict, Vector{UInt8}}
+    headers = ["Authorization" => "Bearer $(auth.access_token)"]
+    if args !== nothing
+        json_args = JSON.json(args)
+    else
+        json_args = nothing
+    end
+
+    # Are we sending arguments as body or in a header?
+    if content === HTTP.nobody && !expecting_content
+        # Arguments as body
+        if json_args !== nothing
+            push!(headers, "Content-Type" => "application/json")
+            body = json_args
+        else
+            body = HTTP.nobody
+        end
+    else
+        # Arguments in header
+        if json_args !== nothing
+            push!(headers, "Dropbox-API-Arg" => json_args)
+        end
+        push!(headers, "Content-Type" => "application/octet-stream")
+        body = content
+    end
+
+    retry_count = 0
+    result = nothing
+    result_content = HTTP.nobody
+    while retry_count < 3
+        retry_count += 1
+        if retry_count > 1
+            println("Info: Retrying...")
+            verbose = 2
+        end
+
+        wait_for_retry()
+
+        try
+
+            response = HTTP.request("POST", url, headers, body;
+                                    canonicalize_headers=true, verbose=verbose)
+
+            # Are we expecting the result in the body or in a header?
+            if !expecting_content
+                # Result as body
+                json_result = response.body
+                result_content = HTTP.nobody
+            else
+                # Result in header
+                json_result = Dict(response.headers)["Dropbox-Api-Result"]
+                result_content = response.body
+            end
+
+            result =
+                JSON.parse(String(json_result); dicttype=Dict, inttype=Int64)
+            if result === nothing
+                result = Dict()
+            end
+
+        catch exception
+            if exception isa HTTP.StatusError
+                response = exception.response
+                result = JSON.parse(String(response.body);
+                                    dicttype=Dict, inttype=Int64)
+
+                # Should we retry?
+                retry_after = mapget(s->parse(Float64, s),
+                                     Dict(response.headers), "Retry-After")
+                if retry_after !== nothing
+                    println("Warning $(exception.status):",
+                            " $(result["error_summary"])")
+                    set_retry_delay(retry_after)
+                    continue
+                end
+                # Status error without retry header -- give up
+                throw(DropboxError(result))
+            elseif (exception isa ErrorException &&
+                    startswith(exception.msg,
+                               "Unexpected end of input\nLine: 0\n"))
+                # I don't understand this error; maybe it is
+                # ephemeral? We will retry.
+                println("Info: Error $exception")
+                continue
+            elseif exception isa Base.IOError
+                # I don't understand this error; maybe it is
+                # ephemeral? We will retry.
+                println("Info: Error $exception")
+                continue
+            end
+            # Some other error -- give up
+            rethrow(exception)
+        end
+
+        # The request worked -- return
+        return result, result_content
+    end
+
+    println("Info: Giving up.")
+    throw(DropboxError(result))
+end
+                   
+
+
 """
     post_rpc(auth::Authorization,
              fun::String,
@@ -160,77 +272,7 @@ Post an RPC request to the Dropbox API.
 function post_rpc(auth::Authorization,
                   fun::String,
                   args::Union{Nothing, Dict} = nothing)::Dict
-    headers = ["Authorization" => "Bearer $(auth.access_token)",
-               ]
-    if args !== nothing
-        push!(headers, "Content-Type" => "application/json")
-        body = JSON.json(args)
-    else
-        body = HTTP.nobody
-    end
-
-    retry_count = 0
-
-    # We might need to retry several times
-    while true
-        wait_for_retry()
-        try
-            resp = HTTP.request(
-                "POST", "https://api.dropboxapi.com/2/$fun", headers, body;
-                verbose=0)
-            res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
-            return res
-        catch ex
-            if ex isa HTTP.StatusError
-                resp = ex.response
-                res = JSON.parse(String(resp.body);
-                                 dicttype=Dict, inttype=Int64)
-
-                # Should we retry?
-                resp2 = Dict(lowercase(key) => value
-                             for (key, value) in resp.headers)
-                retry_after = mapget(s->parse(Float64, s), resp2, "retry-after")
-                if retry_after !== nothing
-                    println("Info: Error $(ex.status): $(res["error_summary"])")
-                    set_retry_delay(retry_after)
-                    println("Info: Retrying...")
-                    continue
-                end
-
-                throw(DropboxError(res))
-            elseif ex == ArgumentError(
-                "`unsafe_write` requires `iswritable(::SSLContext)`")
-
-                # This is an error in the HTTP module; we just retry
-                retry_count += 1
-                if retry_count <= 2
-                    println("Info: Error $ex")
-                    println("Info: Retrying...")
-                    continue
-                end
-            elseif (ex isa ErrorException &&
-                    startswith(ex.msg, "Unexpected end of input\nLine: 0\n"))
-                # I don't understand this error; maybe it is
-                # ephemeral? We will retry.
-                retry_count += 1
-                if retry_count <= 2
-                    println("Info: Error $ex")
-                    println("Info: Retrying...")
-                    continue
-                end
-            elseif ex isa IOError
-                # I don't understand this error; maybe it is
-                # ephemeral? We will retry.
-                retry_count += 1
-                if retry_count <= 2
-                    println("Info: Error $ex")
-                    println("Info: Retrying...")
-                    continue
-                end
-            end
-            rethrow(ex)
-        end
-    end
+    post_http(auth, "https://api.dropboxapi.com/2/$fun", args)[1]
 end
 
 
@@ -243,83 +285,13 @@ end
 
 Post a Content Upload request to the Dropbox API.
 """
-# TODO: Accept more content types (see documentation), not just
-# Vector{UInt8}
-# TODO: use canonicalize_headers = true
-# TODO: experiment with retry_non_idempotent = true
-# TODO: optionally set file time stamp
 function post_content_upload(auth::Authorization,
                              fun::String,
                              args::Union{Nothing, Dict},
-                             content::Vector{UInt8})::Union{Nothing, Dict}
-    headers = ["Authorization" => "Bearer $(auth.access_token)",
-               ]
-    push!(headers, "Dropbox-API-Arg" => JSON.json(args))
-    push!(headers, "Content-Type" => "application/octet-stream")
-    body = content
-
-    retry_count = 0
-
-    # We might need to retry several times
-    while true
-        wait_for_retry()
-        try
-            resp = HTTP.request(
-                "POST", "https://content.dropboxapi.com/2/$fun", headers, body;
-                verbose=0)
-            res = JSON.parse(String(resp.body); dicttype=Dict, inttype=Int64)
-            return res
-        catch ex
-            if ex isa HTTP.StatusError
-                resp = ex.response
-                res = JSON.parse(String(resp.body);
-                                 dicttype=Dict, inttype=Int64)
-
-                # Should we retry?
-                resp2 = Dict(lowercase(key) => value
-                             for (key, value) in resp.headers)
-                retry_after = mapget(s->parse(Float64, s), resp2, "retry-after")
-                if retry_after !== nothing
-                    println("Warning $(ex.status): $(res["error_summary"])")
-                    set_retry_delay(retry_after)
-                    println("Retrying...")
-                    continue
-                end
-
-                throw(DropboxError(res))
-            elseif ex == ArgumentError(
-                "`unsafe_write` requires `iswritable(::SSLContext)`")
-
-                # This is an error in the HTTP module; we just retry
-                retry_count += 1
-                if retry_count <= 2
-                    println("Info: Error $ex")
-                    println("Info: Retrying...")
-                    continue
-                end
-            elseif (ex isa ErrorException &&
-                    startswith(ex.msg, "Unexpected end of input\nLine: 0\n"))
-                # I don't understand this error; maybe it is
-                # ephemeral? We will retry.
-                retry_count += 1
-                if retry_count <= 2
-                    println("Info: Error $ex")
-                    println("Info: Retrying...")
-                    continue
-                end
-            elseif ex isa IOError
-                # I don't understand this error; maybe it is
-                # ephemeral? We will retry.
-                retry_count += 1
-                if retry_count <= 2
-                    println("Info: Error $ex")
-                    println("Info: Retrying...")
-                    continue
-                end
-            end
-            rethrow(ex)
-        end
-    end
+                             content
+                             )::Dict   # Union{Nothing, Dict}
+    post_http(auth, "https://content.dropboxapi.com/2/$fun", args,
+              content=content)[1]
 end
 
 
@@ -336,76 +308,8 @@ function post_content_download(auth::Authorization,
                                fun::String,
                                args::Union{Nothing, Dict}
                                )::Tuple{Dict, Vector{UInt8}}
-    headers = ["Authorization" => "Bearer $(auth.access_token)",
-               ]
-    push!(headers, "Dropbox-API-Arg" => JSON.json(args))
-    push!(headers, "Content-Type" => "application/octet-stream")
-
-    retry_count = 0
-
-    # We might need to retry several times
-    while true
-        wait_for_retry()
-        try
-            resp = HTTP.request(
-                "POST", "https://content.dropboxapi.com/2/$fun", headers;
-                verbose=0)
-            resp2 = Dict(lowercase(key) => value
-                         for (key, value) in resp.headers)
-            res = JSON.parse(String(resp2["dropbox-api-result"]);
-                             dicttype=Dict, inttype=Int64)
-            return res, resp.body
-        catch ex
-            if ex isa HTTP.StatusError
-                resp = ex.response
-                res = JSON.parse(String(resp.body);
-                                 dicttype=Dict, inttype=Int64)
-
-                # Should we retry?
-                resp2 = Dict(lowercase(key) => value
-                             for (key, value) in resp.headers)
-                retry_after = mapget(s->parse(Float64, s), resp2, "retry-after")
-                if retry_after !== nothing
-                    println("Warning $(ex.status): $(res["error_summary"])")
-                    set_retry_delay(retry_after)
-                    println("Retrying...")
-                    continue
-                end
-
-                throw(DropboxError(res))
-            elseif ex == ArgumentError(
-                "`unsafe_write` requires `iswritable(::SSLContext)`")
-
-                # This is an error in the HTTP module; we just retry
-                retry_count += 1
-                if retry_count <= 2
-                    println("Info: Error $ex")
-                    println("Info: Retrying...")
-                    continue
-                end
-            elseif (ex isa ErrorException &&
-                    startswith(ex.msg, "Unexpected end of input\nLine: 0\n"))
-                # I don't understand this error; maybe it is
-                # ephemeral? We will retry.
-                retry_count += 1
-                if retry_count <= 2
-                    println("Info: Error $ex")
-                    println("Info: Retrying...")
-                    continue
-                end
-            elseif ex isa IOError
-                # I don't understand this error; maybe it is
-                # ephemeral? We will retry.
-                retry_count += 1
-                if retry_count <= 2
-                    println("Info: Error $ex")
-                    println("Info: Retrying...")
-                    continue
-                end
-            end
-            rethrow(ex)
-        end
-    end
+    post_http(auth, "https://content.dropboxapi.com/2/$fun", args,
+              expecting_content=true)
 end
 
 
