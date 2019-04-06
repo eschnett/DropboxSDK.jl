@@ -671,6 +671,8 @@ end
 function upload_many_files(auth::Authorization,
                            upload_channel::Channel{Tuple{String, String}}
                            )::Nothing
+    metadata_dict = Dict{String, Metadata}()
+
     # Use batches of at most N files, and which upload in at most S
     # seconds
     max_files = 500             # Dropbox limit is 1000
@@ -699,7 +701,7 @@ function upload_many_files(auth::Authorization,
 
             j,m = i,n[]
             push!(tasks,
-                  start_task(() -> upload_one_file(auth,
+                  start_task(() -> upload_one_file(auth, metadata_dict,
                                                    j, n, source, destination,
                                                    upload_spec_channel),
                              (:upload_many_files, :upload_one_file,
@@ -750,6 +752,7 @@ function upload_many_files(auth::Authorization,
 end
 
 function upload_one_file(auth::Authorization,
+                         metadata_dict::Dict{String, Metadata},
                          i::Int, n::Ref{Int},
                          source::String, destination::String,
                          upload_spec_channel::Channel{UploadSpec})::Bool
@@ -758,15 +761,37 @@ function upload_one_file(auth::Authorization,
     # a content hash from Dropox in that case
     need_upload = true
     content = nothing
-    metadata = try
-        files_get_metadata(auth, destination)
-    catch ex
-        if ex isa DropboxError
-            nothing
-        else
-            rethrow(ex)
+
+    # metadata = try
+    #     files_get_metadata(auth, destination)
+    # catch ex
+    #     if ex isa DropboxError
+    #         nothing
+    #     else
+    #         rethrow(ex)
+    #     end
+    # end
+
+    metadata = get(metadata_dict, destination, nothing)
+    if metadata === nothing
+        destination_dir = dirname(destination)
+        try
+            # We could list the directory recursively
+            metadatas = files_list_folder(auth, destination_dir)
+            for m in metadatas
+                @assert m.path_display !== nothing
+                metadata_dict[m.path_display] = m
+            end
+        catch ex
+            if ex isa DropboxError
+                nothing
+            else
+                rethrow(ex)
+            end
         end
     end
+    metadata = get(metadata_dict, destination, nothing)
+
     if metadata isa FileMetadata
         size = filesize(source)
         if metadata.size == size
