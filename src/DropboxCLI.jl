@@ -663,7 +663,7 @@ function cmd_put(args)
             if filename == "" || metadata isa FolderMetadata
                 try
                     metadatas =
-                        files_list_folder(auth, destination_dir, recursive=true)
+                        files_list_folder(auth, filename, recursive=true)
                     for m in metadatas
                         @assert m.path_display !== nothing
                         metadata_dict[lowercase(m.path_display)] = m
