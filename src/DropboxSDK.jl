@@ -188,13 +188,13 @@ function post_http(auth::Authorization,
     result_content = HTTP.nobody
 
     @label retry_after_error
-    retry_count += 1
-    if retry_count > 3
-        println("Info: Giving up.")
+    if retry_count >= 3
+        println("Info: Giving up after attempt #$retry_count.")
         throw(DropboxError(result))
     end
+    retry_count += 1
     if retry_count > 1
-        println("Info: Retrying...")
+        println("Info: Retrying, attempt #$retry_count...")
     end
 
     @label retry_after_wait
@@ -239,6 +239,14 @@ function post_http(auth::Authorization,
             end
             # Status error without retry header -- give up
             throw(DropboxError(result))
+
+        elseif (exception isa ArgumentError &&
+                (exception.msg ==
+                 "`unsafe_write` requires `iswritable(::SSLContext)`"))
+            # I don't understand this error; maybe it is ephemeral? We
+            # will retry.
+            println("Info: Error $exception")
+            @goto retry_after_error
 
         elseif (exception isa ErrorException &&
                 startswith(exception.msg, "Unexpected end of input\nLine: 0\n"))
