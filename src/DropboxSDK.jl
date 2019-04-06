@@ -139,7 +139,7 @@ function set_retry_delay(retry_after::Real)
     next_try = time() + retry_after
     try_after[] = max(try_after[], next_try)
 end
-function wait_for_retry()
+function wait_as_requested()
     delay = try_after[] - time()
     if delay > 0
         println("Info: Waiting $(round(delay, digits=1)) seconds...")
@@ -186,77 +186,82 @@ function post_http(auth::Authorization,
     retry_count = 0
     result = nothing
     result_content = HTTP.nobody
-    while retry_count < 3
-        retry_count += 1
-        if retry_count > 1
-            println("Info: Retrying...")
-            verbose = 2
-        end
 
-        wait_for_retry()
-
-        try
-
-            response = HTTP.request("POST", url, headers, body;
-                                    canonicalize_headers=true, verbose=verbose)
-
-            # Are we expecting the result in the body or in a header?
-            if !expecting_content
-                # Result as body
-                json_result = response.body
-                result_content = HTTP.nobody
-            else
-                # Result in header
-                json_result = Dict(response.headers)["Dropbox-Api-Result"]
-                result_content = response.body
-            end
-
-            result =
-                JSON.parse(String(json_result); dicttype=Dict, inttype=Int64)
-            if result === nothing
-                result = Dict()
-            end
-
-        catch exception
-            if exception isa HTTP.StatusError
-                response = exception.response
-                result = JSON.parse(String(response.body);
-                                    dicttype=Dict, inttype=Int64)
-
-                # Should we retry?
-                retry_after = mapget(s->parse(Float64, s),
-                                     Dict(response.headers), "Retry-After")
-                if retry_after !== nothing
-                    println("Warning $(exception.status):",
-                            " $(result["error_summary"])")
-                    set_retry_delay(retry_after)
-                    continue
-                end
-                # Status error without retry header -- give up
-                throw(DropboxError(result))
-            elseif (exception isa ErrorException &&
-                    startswith(exception.msg,
-                               "Unexpected end of input\nLine: 0\n"))
-                # I don't understand this error; maybe it is
-                # ephemeral? We will retry.
-                println("Info: Error $exception")
-                continue
-            elseif exception isa Base.IOError
-                # I don't understand this error; maybe it is
-                # ephemeral? We will retry.
-                println("Info: Error $exception")
-                continue
-            end
-            # Some other error -- give up
-            rethrow(exception)
-        end
-
-        # The request worked -- return
-        return result, result_content
+    @label retry_after_error
+    retry_count += 1
+    if retry_count > 1
+        println("Info: Retrying...")
     end
 
-    println("Info: Giving up.")
-    throw(DropboxError(result))
+    @label retry_after_wait
+
+    retry_count += 1
+    if retry_count > 3
+        println("Info: Giving up.")
+        throw(DropboxError(result))
+    end
+
+    wait_as_requested()
+
+    try
+
+        response = HTTP.request("POST", url, headers, body;
+                                canonicalize_headers=true, verbose=verbose)
+
+        # Are we expecting the result in the body or in a header?
+        if !expecting_content
+            # Result as body
+            json_result = response.body
+            result_content = HTTP.nobody
+        else
+            # Result in header
+            json_result = Dict(response.headers)["Dropbox-Api-Result"]
+            result_content = response.body
+        end
+
+        result = JSON.parse(String(json_result); dicttype=Dict, inttype=Int64)
+        if result === nothing
+            result = Dict()
+        end
+
+    catch exception
+        if exception isa HTTP.StatusError
+            response = exception.response
+            result = JSON.parse(String(response.body);
+                                dicttype=Dict, inttype=Int64)
+
+            # Should we retry?
+            retry_after = mapget(s->parse(Float64, s),
+                                 Dict(response.headers), "Retry-After")
+            if retry_after !== nothing
+                println("Info: Warning $(exception.status):",
+                        " $(result["error_summary"])")
+                set_retry_delay(retry_after)
+                @goto retry_after_wait
+            end
+            # Status error without retry header -- give up
+            throw(DropboxError(result))
+
+        elseif (exception isa ErrorException &&
+                startswith(exception.msg, "Unexpected end of input\nLine: 0\n"))
+            # I don't understand this error; maybe it is ephemeral? We
+            # will retry.
+            println("Info: Error $exception")
+            @goto retry_after_error
+
+        elseif exception isa Base.IOError
+            # I don't understand this error; maybe it is ephemeral? We
+            # will retry.
+            println("Info: Error $exception")
+            @goto retry_after_error
+
+        end
+        # Some other error -- give up
+        rethrow(exception)
+    end
+
+    # The request worked -- return
+    return result, result_content
 end
                    
 
