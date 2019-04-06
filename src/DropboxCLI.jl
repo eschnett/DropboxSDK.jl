@@ -609,9 +609,11 @@ function cmd_put(args)
         return 1
     end
 
+    metadata_dict = Dict{String, Metadata}()
+
     upload_channel = Channel{Tuple{String, String}}(1000)
     upload_task =
-        start_task(() -> upload_many_files(auth, upload_channel),
+        start_task(() -> upload_many_files(auth, metadata_dict, upload_channel),
                    (:cmd_put, :upload_many_files, sources, destination))
     for source in sources
         # Distinguish between files and directories
@@ -640,13 +642,47 @@ function cmd_put(args)
             filename = filename[1:end-1]
         end
 
+        if !haskey(metadata_dict, lowercase(filename))
+            metadata =
+                if filename != ""
+                    try
+                        files_get_metadata(auth, filename)
+                    catch ex
+                        if ex isa DropboxError
+                            nothing
+                        else
+                            rethrow(ex)
+                        end
+                    end
+                else
+                    nothing
+                end
+            if metadata !== nothing
+                metadata_dict[lowercase(filename)] = metadata
+            end
+            if filename == "" || metadata isa FolderMetadata
+                try
+                    metadatas =
+                        files_list_folder(auth, destination_dir, recursive=true)
+                    for m in metadatas
+                        @assert m.path_display !== nothing
+                        metadata_dict[lowercase(m.path_display)] = m
+                    end
+                catch ex
+                    if ex isa DropboxError
+                        nothing
+                    else
+                        rethrow(ex)
+                    end
+                end
+            end
+        end
+
         if !isdir_source
             # The source is a regular file
             put!(upload_channel, (source, filename))
         else
             # Both source and destination are directories
-            # TODO: Instead of files/get_metadata, use
-            # files/list_folder, possibly with option recursive=true
             function walk_upload_entry(source_prefix::String,
                                        filename_prefix::String)
                 for entry in readdir(source)
@@ -669,9 +705,10 @@ function cmd_put(args)
 end
 
 function upload_many_files(auth::Authorization,
+                           metadata_dict::Dict{String, Metadata},
                            upload_channel::Channel{Tuple{String, String}}
                            )::Nothing
-    metadata_dict = Dict{String, Metadata}()
+    # metadata_dict = Dict{String, Metadata}()
 
     # Use batches of at most N files, and which upload in at most S
     # seconds
@@ -772,25 +809,25 @@ function upload_one_file(auth::Authorization,
     #     end
     # end
 
-    metadata = get(metadata_dict, destination, nothing)
-    if metadata === nothing
-        destination_dir = dirname(destination)
-        try
-            # We could list the directory recursively
-            metadatas = files_list_folder(auth, destination_dir)
-            for m in metadatas
-                @assert m.path_display !== nothing
-                metadata_dict[m.path_display] = m
-            end
-        catch ex
-            if ex isa DropboxError
-                nothing
-            else
-                rethrow(ex)
-            end
-        end
-    end
-    metadata = get(metadata_dict, destination, nothing)
+    metadata = get(metadata_dict, lowercase(destination), nothing)
+    # if metadata === nothing
+    #     destination_dir = dirname(destination)
+    #     try
+    #         # We could list the directory recursively
+    #         metadatas = files_list_folder(auth, destination_dir)
+    #         for m in metadatas
+    #             @assert m.path_display !== nothing
+    #             metadata_dict[lowercase(m.path_display)] = m
+    #         end
+    #         metadata = metadata_dict[lowercase(destination)]
+    #     catch ex
+    #         if ex isa DropboxError
+    #             nothing
+    #         else
+    #             rethrow(ex)
+    #         end
+    #     end
+    # end
 
     if metadata isa FileMetadata
         size = filesize(source)
