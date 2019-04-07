@@ -225,14 +225,14 @@ function post_http(auth::Authorization,
     catch exception
         if exception isa HTTP.StatusError
             response = exception.response
-            try
-                result = JSON.parse(String(response.body);
-                                    dicttype=Dict, inttype=Int64)
-                error_summary = result["error_summary"]
+            result = try
+                JSON.parse(String(response.body); dicttype=Dict, inttype=Int64)
             catch
-                result = Dict()
-                error_summary = "(no JSON result in HTTP error): $response"
+                Dict("error_summary" =>
+                     "No JSON result in HTTP error: $response")
             end
+            error_summary = get(result, "error_summary",
+                                "(no error summary in HTTP error): $response")
 
             # Should we retry?
             retry_after = mapget(s->parse(Float64, s),
