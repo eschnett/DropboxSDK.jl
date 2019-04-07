@@ -39,6 +39,26 @@ end
 
 
 
+@testset "Option --verbose" begin
+    lines = runcmd(`--verbose version`)
+    @test length(lines) == 1
+    m = match(r"^Version\s+(.*)", lines[1])
+    @test m !== nothing
+    version = VersionNumber(m.captures[1])
+end
+
+
+
+@testset "Option --debug" begin
+    lines = runcmd(`--debug version`)
+    @test length(lines) == 1
+    m = match(r"^Version\s+(.*)", lines[1])
+    @test m !== nothing
+    version = VersionNumber(m.captures[1])
+end
+
+
+
 @testset "Command account" begin
     lines = runcmd(`account`)
     @test length(lines) == 1

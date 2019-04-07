@@ -29,6 +29,10 @@ add_arg_table(
                :action => :command),
     "version", Dict(:help => "delete file or directory",
                     :action => :command),
+    ["--verbose", "-v"], Dict(:help => "output progress information",
+                              :nargs => 0),
+    ["--debug", "-g"], Dict(:help => "output detailed progress information",
+                            :nargs => 0),
 )
 
 add_arg_table(
@@ -78,6 +82,21 @@ add_arg_table(
     ["--recursive", "-r"], Dict(:help => "recursively delete subdirectories",
                                 :nargs => 0),
 )
+
+
+
+# 0: no output
+# 1: some output
+# 2: detailed output
+const verbose = Ref{Int}(0)
+function parse_verbose(opts)
+    if opts["verbose"]
+        verbose[] = 1
+    end
+    if opts["debug"]
+        verbose[] = 2
+    end
+end
 
 
 
@@ -361,8 +380,10 @@ function cmd_get(args)
                 content = read(filename)
                 content_hash = calc_content_hash(content)
                 if content_hash == metadata.content_hash
-                    println("Info: $(quote_string(filename)):",
-                            " content hash matches; skipping download")
+                    if verbose[] >= 2
+                        println("Info: $(quote_string(filename)):",
+                                " content hash matches; skipping download")
+                    end
                     need_download = false
                 end
             elseif size < metadata.size
@@ -372,9 +393,11 @@ function cmd_get(args)
                 content = read(filename, metadata.size)
                 content_hash = calc_content_hash(content)
                 if content_hash == metadata.content_hash
-                    println("Info: $(quote_string(filename)):",
-                            " content hash matches;",
-                            " truncating local file and skipping download")
+                    if verbose[] >= 2
+                        println("Info: $(quote_string(filename)):",
+                                " content hash matches;",
+                                " truncating local file and skipping download")
+                    end
                     open(filename, "w") do io
                         truncate(io, metadata.size)
                     end
@@ -708,8 +731,6 @@ function upload_many_files(auth::Authorization,
                            metadata_dict::Dict{String, Metadata},
                            upload_channel::Channel{Tuple{String, String}}
                            )::Nothing
-    # metadata_dict = Dict{String, Metadata}()
-
     # Use batches of at most N files, and which upload in at most S
     # seconds
     max_files = 500             # Dropbox limit is 1000
@@ -761,7 +782,10 @@ function upload_many_files(auth::Authorization,
             (upload_cond || time_cond) && break
         end
 
-        println("Info: Finalizing upload")
+        if verbose[] >= 1
+            println("Info: Finalizing upload")
+        end
+        flush(stdout)
         function finalize()
             while !isempty(old_tasks)
                 yield()
@@ -799,42 +823,16 @@ function upload_one_file(auth::Authorization,
     need_upload = true
     content = nothing
 
-    # metadata = try
-    #     files_get_metadata(auth, destination)
-    # catch ex
-    #     if ex isa DropboxError
-    #         nothing
-    #     else
-    #         rethrow(ex)
-    #     end
-    # end
-
     metadata = get(metadata_dict, lowercase(destination), nothing)
-    # if metadata === nothing
-    #     destination_dir = dirname(destination)
-    #     try
-    #         # We could list the directory recursively
-    #         metadatas = files_list_folder(auth, destination_dir)
-    #         for m in metadatas
-    #             @assert m.path_display !== nothing
-    #             metadata_dict[lowercase(m.path_display)] = m
-    #         end
-    #         metadata = metadata_dict[lowercase(destination)]
-    #     catch ex
-    #         if ex isa DropboxError
-    #             nothing
-    #         else
-    #             rethrow(ex)
-    #         end
-    #     end
-    # end
 
     if metadata isa FileMetadata
         size = filesize(source)
         if metadata.size == size
             # Don't upload if content hash matches
-            println("Info: Comparing content hash ($i/$(n[])):",
-                    " $(quote_string(source))")
+            if verbose[] >= 2
+                println("Info: Comparing content hash ($i/$(n[])):",
+                        " $(quote_string(source))")
+            end
             # content = read(source)
             # content_hash = calc_content_hash(content)
             # Read in chunks
@@ -853,9 +851,12 @@ function upload_one_file(auth::Authorization,
             close(data_channel)
             content_hash = fetch(content_hash_task)
             if metadata.content_hash == content_hash
-                println(
-                    "Info: Content hash matches; skipping upload ($i/$(n[])):",
-                    " $(quote_string(source))")
+                if verbose[] >= 2
+                    println(
+                        "Info: Content hash matches;",
+                        " skipping upload ($i/$(n[])):",
+                        " $(quote_string(source))")
+                end
                 need_upload = false
             end
         elseif metadata.size < size
@@ -866,16 +867,21 @@ function upload_one_file(auth::Authorization,
             # before it can be re-uploaded.
             # TODO: Upload to a temporary name, then rename.
             # TODO: Use WriteMode=overwrite instead of deleting.
-            println(
-                "Info: Content hash differs; deleting file first ($i/$(n[])):",
-                " $(quote_string(source))")
+            if verbose[] >= 2
+                println(
+                    "Info: Content hash differs;",
+                    " deleting file first ($i/$(n[])):",
+                    " $(quote_string(source))")
+            end
             files_delete(auth, destination)
         end
     end
 
     # TODO: touch Dropbox file if upload is skipped?
     if need_upload
-        println("Info: Uploading ($i/$(n[]))")
+        if verbose[] >= 1
+            println("Info: Uploading ($i/$(n[]))")
+        end
         content_channel = Channel{Vector{UInt8}}(0)
         put!(upload_spec_channel, UploadSpec(destination, content_channel))
         # Read in chunks of 150 MByte
@@ -899,12 +905,15 @@ function upload_one_file(auth::Authorization,
                 end
                 bscale, bprefix = find_prefix(bytes_read)
                 rscale, rprefix = find_prefix(rate)
-                println(
-                    "Info: Uploading ($i/$(n[])):",
-                    " $(quote_string(source))",
-                    " ($(round(bytes_read / bscale, sigdigits=3)) $(bprefix)B,",
-                    " $(round(Int, 100 * ratio))%,",
-                    " $(round(rate / rscale, sigdigits=3)) $(rprefix)B/s)")
+                if verbose[] >= 2
+                    println(
+                        "Info: Uploading ($i/$(n[])):",
+                        " $(quote_string(source))",
+                        " ($(round(bytes_read / bscale, sigdigits=3))",
+                        " $(bprefix)B,",
+                        " $(round(Int, 100 * ratio))%,",
+                        " $(round(rate / rscale, sigdigits=3)) $(rprefix)B/s)")
+                end
             end
         end
         close(content_channel)
@@ -996,6 +1005,7 @@ function main(args)
             "<https://github.com/eschnett/DropboxSDK.jl>")
     println()
     opts = parse_args(args, arg_settings)
+    parse_verbose(opts)
     cmd = opts["%COMMAND%"]
     fun = cmds[cmd]
     code = fun(opts[cmd])

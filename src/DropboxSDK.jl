@@ -261,6 +261,12 @@ function post_http(auth::Authorization,
             println("Info: Error $exception")
             @goto retry_after_error
 
+        elseif exception isa HTTP.IOExtras.IOError
+            # I don't understand this error; maybe it is ephemeral? We
+            # will retry.
+            println("Info: Error $exception")
+            @goto retry_after_error
+
         end
         # Some other error -- give up
         rethrow(exception)
