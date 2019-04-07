@@ -784,8 +784,8 @@ function upload_many_files(auth::Authorization,
 
         if verbose[] >= 1
             println("Info: Finalizing upload")
+            flush(stdout)
         end
-        flush(stdout)
         function finalize()
             while !isempty(old_tasks)
                 yield()

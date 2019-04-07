@@ -225,15 +225,20 @@ function post_http(auth::Authorization,
     catch exception
         if exception isa HTTP.StatusError
             response = exception.response
-            result = JSON.parse(String(response.body);
-                                dicttype=Dict, inttype=Int64)
+            try
+                result = JSON.parse(String(response.body);
+                                    dicttype=Dict, inttype=Int64)
+                error_summary = result["error_summary"]
+            catch
+                result = Dict()
+                error_summary = "(no JSON result in HTTP error): $response"
+            end
 
             # Should we retry?
             retry_after = mapget(s->parse(Float64, s),
                                  Dict(response.headers), "Retry-After")
             if retry_after !== nothing
-                println("Info: Warning $(exception.status):",
-                        " $(result["error_summary"])")
+                println("Info: Warning $(exception.status): $error_summary")
                 set_retry_delay(retry_after)
                 @goto retry_after_wait
             end
