@@ -8,7 +8,8 @@ function runcmd(args::Cmd; wrap=identity)::Vector{String}
     julia = Base.julia_cmd()
     dbftp = joinpath("..", "bin", "dbftp.jl")
     lines = String[]
-    open(wrap(`$julia $dbftp $args`)) do io
+    cmd = `$julia $dbftp $args`
+    open(wrap(cmd)) do io
         skipcount = 0
         for line in eachline(io)
             if skipcount > 0

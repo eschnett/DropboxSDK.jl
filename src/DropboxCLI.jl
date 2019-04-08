@@ -783,7 +783,7 @@ function upload_many_files(auth::Authorization,
         end
 
         if verbose[] >= 1
-            println("Info: Finalizing upload")
+            println("Info: Finalizing upload ($i/$(n[]))")
             flush(stdout)
         end
         function finalize()
