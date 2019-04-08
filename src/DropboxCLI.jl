@@ -880,7 +880,7 @@ function upload_one_file(auth::Authorization,
     # TODO: touch Dropbox file if upload is skipped?
     if need_upload
         if verbose[] >= 1
-            println("Info: Uploading ($i/$(n[]))")
+            println("Info: Uploading ($i/$(n[])): $(quote_string(source))")
         end
         content_channel = Channel{Vector{UInt8}}(0)
         put!(upload_spec_channel, UploadSpec(destination, content_channel))
