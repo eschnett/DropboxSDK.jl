@@ -50,7 +50,7 @@ function start_task(fun::Function, info=nothing)::Task
                 println("Context: ", string(info))
             end
             println("Exception: ", string(ex)[1:min(10000, end)])
-            println("Backtrace: ", catch_backtrace())
+            println("Backtrace: ", stacktrace(catch_backtrace()))
             rethrow()
         end
     end
@@ -221,6 +221,7 @@ function post_http(auth::Authorization,
                 Dict("error_summary" =>
                      "No JSON result in HTTP error: $response")
             end
+            result["http_status"] = exception.status
             error_summary = get(result, "error_summary",
                                 "(no error summary in HTTP error): $response")
 
@@ -235,7 +236,9 @@ function post_http(auth::Authorization,
 
             # If this is a real error (e.g. a file does not exist),
             # report in right away without retrying
-            if exception.status in (400, 401, 403, 409)
+            if (exception.status in (400, 401, 403, 409) &&
+                get(result, ".tag", nothing) != "internal_error")
+
                 throw(DropboxError(result))
             end
 

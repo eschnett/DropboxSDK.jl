@@ -688,8 +688,10 @@ function cmd_put(args)
                     metadatas =
                         files_list_folder(auth, filename, recursive=true)
                     for m in metadatas
-                        @assert m.path_display !== nothing
-                        metadata_dict[lowercase(m.path_display)] = m
+                        # @assert m.path_display !== nothing
+                        # metadata_dict[lowercase(m.path_display)] = m
+                        @assert m.path_lower !== nothing
+                        metadata_dict[m.path_lower] = m
                     end
                 catch ex
                     if ex isa DropboxError
@@ -782,14 +784,14 @@ function upload_many_files(auth::Authorization,
             (upload_cond || time_cond) && break
         end
 
-        if verbose[] >= 1
-            println("Info: Finalizing upload ($i/$(n[]))")
-            flush(stdout)
-        end
-        function finalize()
+        function finalize(i::Int, n::Ref{Int})
             while !isempty(old_tasks)
                 yield()
                 filter!(!istaskdone, old_tasks)
+            end
+            if verbose[] >= 1
+                println("Info: Flushing upload ($i/$(n[]))")
+                flush(stdout)
             end
             close(upload_spec_channel)
             wait(upload_spec_task)
@@ -801,7 +803,7 @@ function upload_many_files(auth::Authorization,
         old_tasks[:] = tasks[:]
         empty!(tasks)
         j,m = i,n[]
-        finalize_task = start_task(finalize,
+        finalize_task = start_task(() -> finalize(j, n),
                                    (:upload_many_files, :finalize, j, m))
 
     end
