@@ -464,7 +464,7 @@ function cmd_ls(args)
     # TODO: Sort filenames by type. First show all Files, then all
     # Directories prefixed with their names. Also sort everything
     # alphabetically.
-    for filename in filenames
+    for filename in sort(filenames)
 
         # Add leading and remove trailing slashes
         if !startswith(filename, "/")
@@ -507,6 +507,9 @@ function cmd_ls(args)
             println()
             println("$(quote_string(filename)):")
         end
+
+        # Sort
+        sort!(metadatas, by = m -> metadata_path(m, prefix_to_hide))
 
         # Output
         if long

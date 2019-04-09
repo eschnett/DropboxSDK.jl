@@ -175,11 +175,11 @@ end
 
     lines = runcmd(`ls -R $folder`)
     @test lines == [".",
-                    "hello",
                     "dir",
+                    "dir/hello3",
+                    "hello",
                     "hello1",
                     "hello2",
-                    "dir/hello3",
                     ]
 
     lines = runcmd(`ls -l $folder`)
