@@ -173,6 +173,15 @@ end
                     "hello2",
                     ]
 
+    lines = runcmd(`ls -R $folder`)
+    @test lines == [".",
+                    "hello",
+                    "dir",
+                    "hello1",
+                    "hello2",
+                    "dir/hello3",
+                    ]
+
     lines = runcmd(`ls -l $folder`)
     @test length(lines) == 4
     @test startswith(lines[1], "d    ")

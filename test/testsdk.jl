@@ -215,7 +215,7 @@ end
 
 @testset "Delete folder" begin
     files_delete(auth, "/$folder")
-    entries = files_list_folder(auth, "", recursive=true)
+    entries = files_list_folder(auth, "", recursive=false)
     @test count(entry -> startswith(entry.path_display, "/$folder"),
                 entries) == 0
 end
