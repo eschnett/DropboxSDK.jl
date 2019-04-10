@@ -221,7 +221,7 @@ function post_http(auth::Authorization,
                 Dict("error_summary" =>
                      "No JSON result in HTTP error: $response")
             end
-            result["http_status"] = exception.status
+            result["http_status"] = string(exception.status)
             error_summary = get(result, "error_summary",
                                 "(no error summary in HTTP error): $response")
 
