@@ -748,6 +748,8 @@ function upload_many_files(auth::Authorization,
     i = 0
     n = Ref(0)
     while isready(upload_channel) || isopen(upload_channel)
+        # Where n is still changing
+        np = isopen(upload_channel)
 
         nuploads = 0
         upload_spec_channel = Channel{UploadSpec}(0)
@@ -765,10 +767,11 @@ function upload_many_files(auth::Authorization,
             j,m = i,n[]
             push!(tasks,
                   start_task(() -> upload_one_file(auth, metadata_dict,
-                                                   j, n, source, destination,
+                                                   j, n, np,
+                                                   source, destination,
                                                    upload_spec_channel),
                              (:upload_many_files, :upload_one_file,
-                              j, m, source, destination)))
+                              j, m, np, source, destination)))
             while length(tasks) + length(old_tasks) >= max_tasks
                 yield()
                 function check_task(t)
@@ -787,13 +790,13 @@ function upload_many_files(auth::Authorization,
             (upload_cond || time_cond) && break
         end
 
-        function finalize(i::Int, n::Ref{Int})
+        function finalize(i::Int, n::Ref{Int}, np::Bool)
             while !isempty(old_tasks)
                 yield()
                 filter!(!istaskdone, old_tasks)
             end
             if verbose[] >= 1
-                println("Info: Flushing upload ($i/$(n[]))")
+                println("Info: Flushing upload ($i/$(n[])$(np ? "+" : ""))")
                 flush(stdout)
             end
             close(upload_spec_channel)
@@ -806,8 +809,8 @@ function upload_many_files(auth::Authorization,
         old_tasks[:] = tasks[:]
         empty!(tasks)
         j,m = i,n[]
-        finalize_task = start_task(() -> finalize(j, n),
-                                   (:upload_many_files, :finalize, j, m))
+        finalize_task = start_task(() -> finalize(j, n, np),
+                                   (:upload_many_files, :finalize, j, m, np))
 
     end
 
@@ -819,7 +822,7 @@ end
 
 function upload_one_file(auth::Authorization,
                          metadata_dict::Dict{String, Metadata},
-                         i::Int, n::Ref{Int},
+                         i::Int, n::Ref{Int}, np::Bool,
                          source::String, destination::String,
                          upload_spec_channel::Channel{UploadSpec})::Bool
     # Compare content hash before uploading
@@ -859,7 +862,7 @@ function upload_one_file(auth::Authorization,
                 if verbose[] >= 2
                     println(
                         "Info: Content hash matches;",
-                        " skipping upload ($i/$(n[])):",
+                        " skipping upload ($i/$(n[])$(np ? "+" : "")):",
                         " $(quote_string(source))")
                 end
                 need_upload = false
@@ -875,7 +878,7 @@ function upload_one_file(auth::Authorization,
             if verbose[] >= 2
                 println(
                     "Info: Content hash differs;",
-                    " deleting file first ($i/$(n[])):",
+                    " deleting file first ($i/$(n[])$(np ? "+" : "")):",
                     " $(quote_string(source))")
             end
             files_delete(auth, destination)
@@ -885,7 +888,8 @@ function upload_one_file(auth::Authorization,
     # TODO: touch Dropbox file if upload is skipped?
     if need_upload
         if verbose[] >= 1
-            println("Info: Uploading ($i/$(n[])): $(quote_string(source))")
+            println("Info: Uploading ($i/$(n[])$(np ? "+" : "")):",
+                    " $(quote_string(source))")
         end
         content_channel = Channel{Vector{UInt8}}(0)
         put!(upload_spec_channel, UploadSpec(destination, content_channel))
@@ -912,7 +916,7 @@ function upload_one_file(auth::Authorization,
                 rscale, rprefix = find_prefix(rate)
                 if verbose[] >= 2
                     println(
-                        "Info: Uploading ($i/$(n[])):",
+                        "Info: Uploading ($i/$(n[])$(np ? "+" : "")):",
                         " $(quote_string(source))",
                         " ($(round(bytes_read / bscale, sigdigits=3))",
                         " $(bprefix)B,",
