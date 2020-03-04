@@ -89,3 +89,8 @@ DeletedMetadata(d::Dict) = DeletedMetadata(
     get(d, "path_lower", nothing),
     get(d, "path_display", nothing)
 )
+
+export ErrorMetadata
+struct ErrorMetadata <: Metadata
+    error::Dict
+end

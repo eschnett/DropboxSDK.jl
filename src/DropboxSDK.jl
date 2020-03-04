@@ -715,14 +715,14 @@ mutable struct UploadState
     session_id::String
     offset::Int64
     content_hash::String
-    metadata::Union{Nothing, FileMetadata}
+    metadata::Union{Nothing, Metadata}
 end
 
 """
     files_upload(auth::Authorization,
                  upload_spec_channel::Union{AbstractChannel{UploadSpec},
                                             AbstractVector{UploadSpec}}
-                )::Vector{FileMetadata}
+                )::Vector{Metadata}
 
 Uploading several files simultaneously in an efficient manner. The
 upload spec channel is used to describe the uploaded files. This
@@ -735,7 +735,7 @@ This function is efficient if many files are uploaded.
 function files_upload(auth::Authorization,
                       upload_spec_channel::Union{AbstractChannel{UploadSpec},
                                                  AbstractVector{UploadSpec}}
-                      )::Vector{FileMetadata}
+                      )::Vector{Metadata}
     # TODO: can handle only 1000 files at once
     # TODO: parallelize loop
     upload_tasks = Task[]
@@ -752,7 +752,7 @@ function files_upload(auth::Authorization,
 
     if isempty(upload_states)
         # We uploaded zero files
-        return FileMetadata[]
+        return Metadata[]
     end
 
     # We might need to retry several times
@@ -840,8 +840,15 @@ function files_upload(auth::Authorization,
                 failure = entry["failure"]
                 if failure[".tag"] == "too_many_write_operations"
                     # we will retry this entry
+                elseif (failure[".tag"] == "path" &&
+                        failure["path"][".tag"] == "disallowed_name")
+                    # we will ignore this entry
+                    upload_state = upload_states[i]
+                    @assert upload_state.metadata isa Nothing
+                    metadata = ErrorMetadata(entry)
+                    upload_state.metadata = metadata
                 else
-                    throw(DropboxError(failure))
+                    throw(DropboxError(entry))
                 end
             end
         end
@@ -855,8 +862,7 @@ function files_upload(auth::Authorization,
             continue
         end
     
-        return FileMetadata[upload_state.metadata
-                            for upload_state in upload_states]
+        return Metadata[upload_state.metadata for upload_state in upload_states]
     end
 end
 

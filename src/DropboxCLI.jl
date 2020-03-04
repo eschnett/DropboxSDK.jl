@@ -891,41 +891,48 @@ function upload_one_file(auth::Authorization,
             println("Info: Uploading ($i/$(n[])$(np ? "+" : "")):",
                     " $(quote_string(source))")
         end
-        content_channel = Channel{Vector{UInt8}}(0)
-        put!(upload_spec_channel, UploadSpec(destination, content_channel))
-        # Read in chunks of 150 MByte
-        chunksize = 150 * 1024 * 1024
-        bytes_total = filesize(source)
-        bytes_read = Int64(0)
-        start_time = time()
-        open(source, "r") do io
-            while !eof(io)
-                # println("Info: Debug: reading chunk ($i/$(n[]))...")
-                chunk = read(io, chunksize)
-                bytes_read += length(chunk)
-                # println("Info: Debug: sending chunk ($i/$(n[]))...")
-                put!(content_channel, chunk)
-                if bytes_total == 0 || bytes_read == 0
-                    ratio = 1.0
-                    rate = 0
-                else
-                    ratio = bytes_read / bytes_total
-                    rate = bytes_read / max(1.0, time() - start_time)
+        try
+            open(source, "r") do io
+                content_channel = Channel{Vector{UInt8}}(0)
+                put!(upload_spec_channel,
+                     UploadSpec(destination, content_channel))
+                # Read in chunks of 150 MByte
+                chunksize = 150 * 1024 * 1024
+                bytes_total = filesize(source)
+                bytes_read = Int64(0)
+                start_time = time()
+                while !eof(io)
+                    # println("Info: Debug: reading chunk ($i/$(n[]))...")
+                    chunk = read(io, chunksize)
+                    bytes_read += length(chunk)
+                    # println("Info: Debug: sending chunk ($i/$(n[]))...")
+                    put!(content_channel, chunk)
+                    if bytes_total == 0 || bytes_read == 0
+                        ratio = 1.0
+                        rate = 0
+                    else
+                        ratio = bytes_read / bytes_total
+                        rate = bytes_read / max(1.0, time() - start_time)
+                    end
+                    bscale, bprefix = find_prefix(bytes_read)
+                    rscale, rprefix = find_prefix(rate)
+                    if verbose[] >= 2
+                        println(
+                            "Info: Uploading ($i/$(n[])$(np ? "+" : "")):",
+                            " $(quote_string(source))",
+                            " ($(round(bytes_read / bscale, sigdigits=3))",
+                            " $(bprefix)B,",
+                            " $(round(Int, 100 * ratio))%,",
+                            " $(round(rate / rscale, sigdigits=3))",
+                            " $(rprefix)B/s)")
+                    end
                 end
-                bscale, bprefix = find_prefix(bytes_read)
-                rscale, rprefix = find_prefix(rate)
-                if verbose[] >= 2
-                    println(
-                        "Info: Uploading ($i/$(n[])$(np ? "+" : "")):",
-                        " $(quote_string(source))",
-                        " ($(round(bytes_read / bscale, sigdigits=3))",
-                        " $(bprefix)B,",
-                        " $(round(Int, 100 * ratio))%,",
-                        " $(round(rate / rscale, sigdigits=3)) $(rprefix)B/s)")
-                end
+                close(content_channel)
             end
+        catch ex
+            println("Warning: Could not read file $(quote_string(source))")
+            need_upload = false
         end
-        close(content_channel)
     end
 
     return need_upload
@@ -1012,6 +1019,7 @@ const cmds = Dict(
 function main(args)
     println("Julia Dropbox client   ",
             "<https://github.com/eschnett/DropboxSDK.jl>")
+    println("(modified)")
     println()
     opts = parse_args(args, arg_settings)
     parse_verbose(opts)
